@@ -2,78 +2,75 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Visor de Catálogo</title>
+<title>Catálogo Geodatos</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <style>
-  body { font-family: sans-serif; background: #f4f1e9; display: flex; height: 100vh; margin: 0; }
+  body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; background: #fbfaf5; }
   .panel { width: 350px; padding: 20px; border-right: 2px solid #1a1f1c; overflow-y: auto; }
-  .viewer { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; }
-  .fileitem { padding: 10px; cursor: pointer; border-bottom: 1px solid #ccc; }
-  .fileitem:hover { background: #e0dccc; }
-  #coverImg { max-width: 100%; max-height: 80vh; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+  .viewer { flex: 1; padding: 40px; display: flex; flex-direction: column; align-items: center; }
+  .item { padding: 12px; cursor: pointer; border-bottom: 1px solid #cfc9b8; transition: 0.2s; }
+  .item:hover { background: #e8e4d8; }
+  #coverImg { max-width: 80%; border: 1px solid #1a1f1c; box-shadow: 5px 5px 0px #1f6b4f; }
+  .btn { margin-top: 20px; padding: 10px 20px; background: #1f6b4f; color: white; border: none; cursor: pointer; text-decoration: none; }
 </style>
 </head>
 <body>
 
 <section class="panel">
-  <h2>Catálogo</h2>
+  <h2>CATÁLOGO</h2>
+  <select id="catSel" style="width:100%; padding:8px; margin-bottom:20px;">
+    <option value="archivar/paquetes.csv">IDE's de Bolivia</option>
+    <option value="archivar/geobolivia_2021/catalogo.csv">GeoBolivia v2021</option>
+  </select>
+  
   <div id="fileList"></div>
 </section>
 
-<section class="viewer">
-  <div id="displayArea">Selecciona un archivo para ver su portada.</div>
+<section class="viewer" id="displayArea">
+  <div style="color:#6b6657;">Selecciona un elemento para previsualizar</div>
 </section>
 
 <script>
 const REPO = "mauforonda/geodatos";
 const BRANCH = "master";
-// Lista fija de archivos permitidos
-const ALLOWED_FILES = [
-  "archivar/paquetes.csv",
-  "archivar/geobolivia_2021/catalogo.csv"
-];
 
-async function init() {
-  const listDiv = document.getElementById("fileList");
-  
-  for (const path of ALLOWED_FILES) {
-    const btn = document.createElement("div");
-    btn.className = "fileitem";
-    btn.textContent = path.split('/').pop();
-    btn.onclick = () => loadCSV(path);
-    listDiv.appendChild(btn);
-  }
-}
+// Inicializar
+const catSel = document.getElementById("catSel");
+catSel.onchange = () => loadCSV(catSel.value);
 
 function loadCSV(path) {
   const url = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/${path}`;
   Papa.parse(url, {
     download: true, header: true,
     complete: res => {
-      const listDiv = document.getElementById("fileList");
-      // Limpiamos los ítems anteriores para poner las filas del CSV
-      listDiv.innerHTML = `<h3>Contenido: ${path.split('/').pop()}</h3>`;
-      res.data.forEach((row, i) => {
-        if (!row.identifier) return;
-        const item = document.createElement("div");
-        item.className = "fileitem";
-        item.textContent = row.titulo || "Elemento " + i;
-        item.onclick = () => showCover(row.identifier);
-        listDiv.appendChild(item);
+      const list = document.getElementById("fileList");
+      list.innerHTML = `<h4>Contenido</h4>`;
+      res.data.forEach(row => {
+        if(!row.identifier) return;
+        const div = document.createElement("div");
+        div.className = "item";
+        div.textContent = row.titulo || "Sin título";
+        div.onclick = () => renderView(row.identifier, row.titulo);
+        list.appendChild(div);
       });
     }
   });
 }
 
-function showCover(identifier) {
-  const display = document.getElementById("displayArea");
-  // URL directa de la imagen generada en Archive.org
-  const imgUrl = `https://archive.org/download/${identifier}/cover.png`;
+function renderView(id, titulo) {
+  const area = document.getElementById("displayArea");
+  const imgUrl = `https://archive.org/download/${id}/cover.png`;
+  const downloadUrl = `https://archive.org/details/${id}`;
   
-  display.innerHTML = `<img id="coverImg" src="${imgUrl}" onerror="this.src='https://via.placeholder.com/300?text=Sin+Portada';">`;
+  area.innerHTML = `
+    <h1>${titulo}</h1>
+    <img id="coverImg" src="${imgUrl}" onerror="this.src='https://via.placeholder.com/400?text=Sin+Imagen'">
+    <a href="${downloadUrl}" target="_blank" class="btn">Descargar / Ver en Archive.org</a>
+  `;
 }
 
-init();
+// Carga inicial
+loadCSV(catSel.value);
 </script>
 </body>
 </html>
