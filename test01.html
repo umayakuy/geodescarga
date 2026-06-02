@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explorador de GeoDatos · Bolivia</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{ --bg:#f4f1e9; --ink:#1a1f1c; --paper:#fbfaf5; --line:#cfc9b8; --accent:#1f6b4f; --accent-2:#c5532b; --muted:#6b6657; }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;font-family:'Spline Sans Mono',monospace;background:var(--bg)}
+  header{border-bottom:2px solid var(--ink);padding:22px 48px;background:var(--paper);display:flex;justify-content:space-between;align-items:center}
+  .brand h1{font-family:'Fraunces',serif;margin:0}
+  main{display:grid;grid-template-columns:400px 1fr;min-height:calc(100vh - 100px)}
+  .panel{padding:30px;border-right:2px solid var(--ink);background:var(--paper);overflow-y:auto}
+  .map-wrap{display:flex;flex-direction:column}
+  #map{flex:1;background:#e8e4d8}
+  .btn{padding:10px;background:var(--accent-2);color:#fff;border:none;cursor:pointer;margin-top:10px;width:100%}
+  .hidden{display:none}
+  .spinner{display:inline-block;width:18px;height:18px;border:2px solid #ccc;border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><h1>Explorador de <span style="color:var(--accent-2)">GeoDatos</span></h1></div>
+  <div id="repoLink"></div>
+</header>
+
+<main>
+  <section class="panel">
+    <div id="step1">
+      <label>1. Catálogo (CSV)</label>
+      <select id="catSel"><option>Cargando...</option></select>
+    </div>
+    <div id="step2" style="margin-top:20px">
+      <label>2. Archivo</label>
+      <div id="fileList" style="margin-top:10px;border:1px solid #ccc;max-height:300px;overflow-y:auto"></div>
+    </div>
+    <div id="status" style="margin-top:20px;font-size:12px"></div>
+  </section>
+
+  <section class="map-wrap">
+    <div style="padding:10px;border-bottom:1px solid #ccc">
+      <div id="mapInfo">Selecciona un archivo para visualizar.</div>
+      <button class="btn hidden" id="dlBtn">⤓ Descargar GeoJSON</button>
+    </div>
+    <div id="map"></div>
+  </section>
+</main>
+
+<script>
+const REPO = "mauforonda/geodatos";
+const BRANCH = "master";
+const $ = s => document.querySelector(s);
+let map, layer;
+let detected = {identifier:"identifier", label:"titulo"};
+
+async function loadCatalogs(){
+  const r = await fetch(`https://api.github.com/repos/${REPO}/contents/archivar?ref=${BRANCH}`);
+  const items = await r.json();
+  const sel = $("#catSel");
+  sel.innerHTML = items.map(it => `<option value="${it.download_url}">${it.name}</option>`).join("");
+  sel.onchange = () => loadCSV(sel.value);
+  loadCSV(items[0].download_url);
+}
+
+function loadCSV(url){
+  Papa.parse(url, {
+    download:true, header:true,
+    complete: res => {
+      const list = $("#fileList");
+      list.innerHTML = res.data.map((r,i) => `<div class="fileitem" style="padding:10px;cursor:pointer;border-bottom:1px solid #eee" data-idx="${i}">${r.titulo || 'Capa '+i}</div>`).join("");
+      list.querySelectorAll(".fileitem").forEach(el => el.onclick = () => selectFile(res.data[el.dataset.idx]));
+    }
+  });
+}
+
+async function selectFile(row){
+  const ident = row.identifier;
+  const url = `https://archive.org/download/${ident}/dataset.geojson`;
+  $("#mapInfo").innerHTML = `<b>${row.titulo}</b> <span class="spinner"></span>`;
+  
+  try {
+    const r = await fetch(url);
+    if(!r.ok) throw new Error("Archivo no encontrado");
+    const data = await r.json();
+    drawGeoJSON(data, row.titulo, url);
+  } catch(e) {
+    $("#mapInfo").innerHTML = "Error al cargar: " + e.message;
+  }
+}
+
+function drawGeoJSON(data, label, url){
+  if(!map) map = L.map("map").setView([-16.5,-64.5], 5);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png").addTo(map);
+  if(layer) map.removeLayer(layer);
+  layer = L.geoJSON(data).addTo(map);
+  if(layer.getBounds().isValid()) map.fitBounds(layer.getBounds());
+  $("#mapInfo").innerHTML = `<b>${label}</b> cargado.`;
+  $("#dlBtn").classList.remove("hidden");
+  $("#dlBtn").onclick = () => window.open(url);
+}
+
+loadCatalogs();
+</script>
+</body>
+</html>
