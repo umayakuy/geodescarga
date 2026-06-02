@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Explorador de Mapas · Archivo</title>
+<title>Explorador de GeoDatos · Bolivia</title>
 
+<!-- PapaParse para CSV -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,13 +14,14 @@
 
 <style>
   :root{
-    --bg:#f4f1e9;
-    --ink:#1a1f1c;
+    --bg:#f4f1e9;          /* papel */
+    --ink:#1a1f1c;         /* tinta */
     --paper:#fbfaf5;
     --line:#cfc9b8;
-    --accent:#1f6b4f;
-    --accent-2:#c5532b;
+    --accent:#1f6b4f;      /* verde topográfico */
+    --accent-2:#c5532b;    /* terracota */
     --muted:#6b6657;
+    --shadow:rgba(26,31,28,.12);
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
@@ -84,7 +86,7 @@
   .selectwrap{position:relative}
   .selectwrap::after{content:"▾";position:absolute;right:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--accent)}
 
-  .filelist{max-height:350px;overflow-y:auto;border:1.5px solid var(--line);margin-top:4px}
+  .filelist{max-height:280px;overflow-y:auto;border:1.5px solid var(--line);margin-top:4px}
   .fileitem{
     padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;
     display:flex;justify-content:space-between;gap:10px;align-items:center;
@@ -95,18 +97,20 @@
   .fileitem .meta{font-size:11px;color:var(--muted);flex-shrink:0}
   .fileitem.sel .meta{color:rgba(255,255,255,.8)}
 
-  .map-wrap{position:relative;display:flex;flex-direction:column}
-  
-  /* Ajuste para visualizar la imagen en lugar del mapa */
-  #map{
-    flex:1;min-height:420px;background:#e8e4d8; 
-    display:flex; align-items:center; justify-content:center; padding:20px;
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;justify-content:center;
+    width:100%;padding:13px;margin-top:14px;border:2px solid var(--ink);
+    background:var(--accent-2);color:#fff;font-family:'Fraunces',serif;font-weight:600;font-size:15px;
+    cursor:pointer;text-decoration:none;transition:transform .1s,box-shadow .1s;
+    box-shadow:4px 4px 0 var(--ink);
   }
-  #map img {
-    max-width: 100%; max-height: 70vh; 
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 2px solid var(--ink);
-  }
+  .btn:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 var(--ink)}
+  .btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+  .btn:disabled{background:var(--line);cursor:not-allowed;box-shadow:none;transform:none;color:var(--muted)}
+  .btn.ghost{background:var(--paper);color:var(--ink);box-shadow:4px 4px 0 var(--line);border-color:var(--line)}
 
+  .map-wrap{position:relative;display:flex;flex-direction:column}
+  #map{flex:1;min-height:420px;background:var(--bg);overflow:auto}
   .mapbar{
     padding:10px clamp(14px,2vw,24px);border-bottom:1.5px solid var(--ink);
     background:var(--paper);display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
@@ -114,69 +118,69 @@
   .mapbar .info{font-size:12px;color:var(--muted)}
   .mapbar .info b{color:var(--ink);font-family:'Fraunces',serif}
   .mapbar .actions{display:flex;gap:10px}
-  
-  .btn{
-    display:inline-flex;align-items:center;gap:8px;justify-content:center;
-    padding:8px 16px; border:2px solid var(--ink);
-    background:var(--accent-2);color:#fff;font-family:'Fraunces',serif;font-weight:600;font-size:13px;
-    cursor:pointer;text-decoration:none;transition:transform .1s,box-shadow .1s;
-    box-shadow:3px 3px 0 var(--ink);
-  }
-  .btn:hover{transform:translate(-2px,-2px);box-shadow:5px 5px 0 var(--ink)}
-  .btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
-  .btn.ghost{background:var(--paper);color:var(--ink);box-shadow:3px 3px 0 var(--line);border-color:var(--line)}
+  .mapbar .btn{width:auto;margin:0;padding:8px 16px;font-size:13px;box-shadow:3px 3px 0 var(--ink)}
 
   .status{font-size:12px;margin-top:10px;padding:10px;border-left:3px solid var(--accent);background:rgba(31,107,79,.06);color:var(--muted);display:none}
   .status.show{display:block}
   .status.err{border-color:var(--accent-2);background:rgba(197,83,43,.08)}
+
   .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);text-align:center;padding:40px;gap:14px}
   .empty .glyph{font-size:54px;font-family:'Fraunces',serif;color:var(--line)}
+
+  /* visor de imagen */
+  .imgview{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;gap:12px;position:relative}
+  .imgwrap{position:relative;max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center}
+  #coverImg{max-width:100%;max-height:62vh;object-fit:contain;border:1px solid var(--line);background:#fff;box-shadow:4px 4px 0 var(--shadow)}
+  .legend{max-width:min(420px,90%);max-height:160px;object-fit:contain;background:#fff;border:1px solid var(--line);padding:6px}
+  .imgspin{position:absolute}
   .spinner{width:18px;height:18px;border:2.5px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle}
   @keyframes spin{to{transform:rotate(360deg)}}
   .hidden{display:none!important}
+  .hint{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4}
   .count{font-size:11px;color:var(--accent);float:right;font-weight:500}
 </style>
 </head>
 <body>
 <header>
   <div class="brand">
-    <h1>Explorador de <span class="accent">Mapas</span></h1>
-    <p>Visualiza y descarga mapas históricos y paquetes IDE archivados desde Internet Archive.</p>
+    <h1>Explorador de <span class="accent">GeoDatos</span></h1>
+    <p>Navega los catálogos de datos geográficos sobre Bolivia y obtén las capas archivadas en GeoJSON desde Internet Archive.</p>
   </div>
   <div class="src">
-    Repositorio:<br>
-    <a href="https://github.com/mauforonda/geodatos" target="_blank">mauforonda/geodatos</a>
+    Fuente:<br>
+    <a id="repoLink" href="#" target="_blank" rel="noopener">github.com/…/geodatos</a>
   </div>
 </header>
 
 <main>
   <section class="panel">
+    <!-- Paso 1: catálogo -->
     <div class="step active done" id="step1">
-      <h2><span class="num">1</span> Categoría Principal</h2>
-      <label class="fld" for="catSel">Elige un catálogo</label>
+      <h2><span class="num">1</span> Catálogo</h2>
+      <label class="fld" for="catSel">Elige un catálogo (CSV)</label>
       <div class="selectwrap">
-        <select id="catSel" onchange="if(this.value) loadCatalog(this.value)">
-            <option value="">— elige una opción —</option>
-            <option value="archivar/paquetes.csv">IDE's de Bolivia (paquetes.csv)</option>
-            <option value="archivar/geobolivia_2021/catalogo.csv">GeoBolivia v2021 (catalogo.csv)</option>
-        </select>
+        <select id="catSel"><option>Cargando catálogos…</option></select>
       </div>
+      <div class="hint" id="catHint"></div>
     </div>
 
+    <!-- Paso 2: categoría -->
     <div class="step" id="step2">
-      <h2><span class="num">2</span> Filtro de Categoría</h2>
+      <h2><span class="num">2</span> Categoría</h2>
       <label class="fld" for="colSel">Agrupar por columna</label>
       <div class="selectwrap">
         <select id="colSel" disabled></select>
       </div>
-      <label class="fld" for="valSel" style="margin-top:12px">Selección</label>
+      <label class="fld" for="valSel" style="margin-top:12px">Categoría</label>
       <div class="selectwrap">
         <select id="valSel" disabled></select>
       </div>
+      <div class="hint">Si el catálogo no tiene categorías, este paso se omite automáticamente.</div>
     </div>
 
+    <!-- Paso 3: archivo -->
     <div class="step" id="step3">
-      <h2><span class="num">3</span> Seleccionar Mapa <span class="count" id="fileCount"></span></h2>
+      <h2><span class="num">3</span> Archivo <span class="count" id="fileCount"></span></h2>
       <label class="fld" for="fileSearch">Filtrar</label>
       <input type="text" id="fileSearch" placeholder="buscar por nombre…" disabled>
       <div class="filelist" id="fileList"></div>
@@ -187,43 +191,58 @@
 
   <section class="map-wrap">
     <div class="mapbar">
-      <div class="info" id="mapInfo">Selecciona un mapa para ver su portada.</div>
+      <div class="info" id="mapInfo">Selecciona una capa para ver su vista previa.</div>
       <div class="actions">
-        <a class="btn ghost hidden" id="archiveBtn" target="_blank" rel="noopener">Ver en Archive ↗</a>
-        <button class="btn hidden" id="dlBtn">⤓ Descargar Mapa</button>
+        <a class="btn ghost hidden" id="archiveBtn" target="_blank" rel="noopener">Ver en Archive.org ↗</a>
+        <button class="btn hidden" id="dlBtn">⤓ Descargar GeoJSON</button>
       </div>
     </div>
-    
-    <div id="map">
-      <div class="empty" id="mapEmpty">
-        <div class="glyph">🖼️</div>
-        <div>Aquí aparecerá el archivo cover.png del mapa.</div>
-      </div>
+    <div id="map"></div>
+    <div class="empty" id="mapEmpty">
+      <div class="glyph">⌖</div>
+      <div>Aquí aparecerá la vista previa de la capa seleccionada.</div>
     </div>
   </section>
 </main>
 
 <script>
 /* ============================================================
-   CONFIGURACIÓN BASE
+   CONFIGURACIÓN — ajusta solo esto si forkeas a otro repo
    ============================================================ */
-const rawBase = "https://raw.githubusercontent.com/mauforonda/geodatos/master/";
-const $ = s => document.querySelector(s);
+const REPO   = "mauforonda/geodatos";  // owner/repo
+const BRANCH = "master";
+// Carpetas del repo donde buscar catálogos CSV (autodescubre dentro de ellas):
+const SEARCH_DIRS = ["archivar", "evaluar", "descubrir", ""];
 
+/* ============================================================
+   Heurísticas: detectar columnas relevantes sin nombres fijos
+   ============================================================ */
 const COL_HINTS = {
+  // identificador del item en archive.org
   identifier: ["archive_item","archiveitem","identifier","item","archive","ia_id","ia_identifier","id_archive","internetarchive"],
+  // nombre del archivo (geojson) dentro del item  (este catálogo NO lo trae;
+  // se descubre vía la metadata API de archive.org)
   filename:   ["filename","file","archivo","nombre_archivo","geojson","fichero","nombre_geojson"],
+  // url directa (si el CSV ya la trae)
+  url:        ["url","enlace","link","download","descarga","href","geojson_url"],
+  // etiqueta legible
   label:      ["titulo","title","nombre","name","layer","capa","dataset","label"],
+  // posibles categorías
   category:   ["geoserver","categoria","category","grupo","group","tipo","type","tema","theme","fuente","source","departamento","sector","clase"]
 };
 
-let rows = [];          
-let headers = [];       
-let detected = {};      
-let selectedRow = null;
-let currentFiltered = [];
-let lastDirectUrl = null;
+const $ = s => document.querySelector(s);
+const rawBase = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/`;
+$("#repoLink").href = `https://github.com/${REPO}`;
+$("#repoLink").textContent = `github.com/${REPO}`;
 
+let catalogs = [];      // [{name,path}]
+let rows = [];          // filas del CSV activo
+let headers = [];       // cabeceras del CSV activo
+let detected = {};      // columnas detectadas
+let selectedRow = null;
+
+/* ---------- utilidades ---------- */
 function setStatus(msg, isErr){
   const s = $("#status");
   if(!msg){ s.classList.remove("show"); return; }
@@ -231,7 +250,6 @@ function setStatus(msg, isErr){
   s.classList.toggle("err", !!isErr);
   s.classList.add("show");
 }
-
 function norm(s){ return (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,""); }
 function matchCol(hints){
   for(const h of hints){
@@ -239,46 +257,402 @@ function matchCol(hints){
     if(hit) return hit;
   }
   for(const h of hints){
-    const hit = headers.find(c => norm(c).includes(norm(h)) && !/^(bytes|tiene|n_|num|count|size|fecha|epsg|bbox)/i.test(c));
+    const hit = headers.find(c =>
+      norm(c).includes(norm(h)) &&
+      !/^(bytes|tiene|n_|num|count|size|fecha|epsg|bbox)/i.test(c)
+    );
     if(hit) return hit;
   }
   return null;
 }
 
-/* ---------- 1. Cargar el CSV (Motor Original de PapaParse) ---------- */
+/* ---------- 1. Descubrir catálogos vía GitHub API ---------- */
+async function loadCatalogs(){
+  setStatus('<span class="spinner"></span> Explorando el repositorio…');
+  const found = [];
+  const seen = new Set();
+  for(const dir of SEARCH_DIRS){
+    const api = `https://api.github.com/repos/${REPO}/contents/${dir}?ref=${BRANCH}`;
+    try{
+      const r = await fetch(api);
+      if(!r.ok) continue;
+      const items = await r.json();
+      if(!Array.isArray(items)) continue;
+      for(const it of items){
+        if(it.type === "file" && /\.csv$/i.test(it.name) && !seen.has(it.path)){
+          seen.add(it.path);
+          found.push({ name: it.path, path: it.path });
+        }
+      }
+    }catch(e){ /* sigue con la próxima carpeta */ }
+  }
+  catalogs = found.sort((a,b)=>a.name.localeCompare(b.name));
+  const sel = $("#catSel");
+  if(!catalogs.length){
+    sel.innerHTML = '<option value="">No se hallaron CSV</option>';
+    setStatus("No se encontraron archivos CSV en las carpetas configuradas. "+
+              "Revisa REPO/BRANCH/SEARCH_DIRS en el código.", true);
+    return;
+  }
+  sel.innerHTML = '<option value="">— elige —</option>' +
+    catalogs.map(c=>`<option value="${c.path}">${c.name}</option>`).join("");
+  $("#catHint").textContent = `${catalogs.length} catálogo(s) encontrado(s).`;
+  setStatus("");
+}
+
+/* ---------- 2. Cargar un CSV ---------- */
 function loadCatalog(path){
   resetFromStep2();
-  setStatus('<span class="spinner"></span> Leyendo catálogo velozmente…');
-  
-  // AQUÍ ESTÁ LA MAGIA ORIGINAL: download: true asegura rendimiento
+  setStatus('<span class="spinner"></span> Leyendo catálogo…');
   Papa.parse(rawBase + path, {
-    download: true, header: true, skipEmptyLines: true,
+    download:true, header:true, skipEmptyLines:true,
     complete: res => {
       rows = res.data.filter(r => Object.values(r).some(v => (v||"").trim() !== ""));
       headers = res.meta.fields || [];
-      
-      detected = {};
-      for(const k in COL_HINTS) detected[k] = matchCol(COL_HINTS[k]);
-      if(!detected.label) detected.label = headers[0] || null;
-
+      detectColumns();
       buildCategoryStep();
-      setStatus(`Cargado: ${rows.length} mapas encontrados.`);
+      setStatus(`Catálogo cargado: ${rows.length} registros · columnas detectadas → ` +
+        `id:<b>${detected.identifier||"—"}</b>, archivo:<b>${detected.filename||"—"}</b>, url:<b>${detected.url||"—"}</b>`);
     },
     error: err => setStatus("Error al leer el CSV: "+err.message, true)
   });
 }
 
-/* ---------- 2. Paso categoría (Idéntico a tu original) ---------- */
+function detectColumns(){
+  detected = {};
+  for(const k in COL_HINTS) detected[k] = matchCol(COL_HINTS[k]);
+  // si no hay label, usa la primera columna de texto
+  if(!detected.label) detected.label = headers[0] || null;
+}
+
+/* ---------- 3. Paso categoría ---------- */
 function buildCategoryStep(){
   const step2 = $("#step2");
   const colSel = $("#colSel");
   const valSel = $("#valSel");
 
+  // columnas candidatas a categoría = las que tienen pocos valores únicos
   const candidates = headers.filter(h=>{
     const uniq = new Set(rows.map(r=>(r[h]||"").trim()).filter(Boolean));
     return uniq.size > 1 && uniq.size <= Math.max(40, rows.length*0.6);
   });
 
   if(!candidates.length){
+    // sin categorías → saltar directo a archivos
     step2.classList.remove("active");
-    colSel.disabled = val
+    colSel.disabled = valSel.disabled = true;
+    colSel.innerHTML = valSel.innerHTML = "";
+    buildFileStep(rows);
+    return;
+  }
+
+  // ordenar poniendo primero la categoría "sugerida"
+  if(detected.category && candidates.includes(detected.category)){
+    candidates.sort((a,b)=> a===detected.category ? -1 : b===detected.category ? 1 : 0);
+  }
+  candidates.unshift("(todos los archivos)");
+
+  step2.classList.add("active","done");
+  colSel.disabled = false;
+  colSel.innerHTML = candidates.map(c=>`<option value="${c}">${c}</option>`).join("");
+  valSel.disabled = true;
+  valSel.innerHTML = "";
+
+  colSel.onchange = ()=>{
+    const col = colSel.value;
+    if(col === "(todos los archivos)"){
+      valSel.disabled = true; valSel.innerHTML = "";
+      buildFileStep(rows);
+      return;
+    }
+    const vals = [...new Set(rows.map(r=>(r[col]||"").trim()).filter(Boolean))].sort();
+    valSel.disabled = false;
+    valSel.innerHTML = '<option value="">— todas —</option>' +
+      vals.map(v=>`<option value="${v}">${v}</option>`).join("");
+    buildFileStep(rows);
+    valSel.onchange = ()=>{
+      const v = valSel.value;
+      buildFileStep(v ? rows.filter(r=>(r[col]||"").trim()===v) : rows);
+    };
+  };
+
+  // arranque: primera candidata real (la sugerida)
+  colSel.value = candidates[1] || candidates[0];
+  colSel.onchange();
+}
+
+/* ---------- 4. Paso archivos ---------- */
+let currentFiltered = [];
+function buildFileStep(subset){
+  currentFiltered = subset;
+  const step3 = $("#step3");
+  step3.classList.add("active","done");
+  $("#fileSearch").disabled = false;
+  $("#fileCount").textContent = `${subset.length} archivo(s)`;
+  renderFiles(subset);
+}
+function renderFiles(subset){
+  const list = $("#fileList");
+  if(!subset.length){ list.innerHTML = '<div class="fileitem">Sin archivos</div>'; return; }
+  list.innerHTML = subset.map((r,i)=>{
+    const idx = rows.indexOf(r);
+    const label = (r[detected.label]||"").trim() ||
+                  (r[detected.filename]||"").trim() ||
+                  (r[detected.identifier]||"").trim() || `registro ${i+1}`;
+    // meta secundaria: tamaño legible y nº de features si existen
+    const bytes = parseInt(r["bytes_geojson"]||r["bytes"]||"0",10);
+    const feats = (r["n_features"]||"").trim();
+    let meta = "";
+    if(bytes>0) meta = humanSize(bytes);
+    else meta = (r[detected.identifier]||"").trim();
+    const ftxt = feats ? `${feats} obj` : "";
+    return `<div class="fileitem" data-idx="${idx}">
+              <span>${label}</span>
+              <span class="meta">${ftxt}${ftxt&&meta?" · ":""}${meta}</span>
+            </div>`;
+  }).join("");
+  list.querySelectorAll(".fileitem").forEach(el=>{
+    el.onclick = ()=>{
+      list.querySelectorAll(".fileitem").forEach(x=>x.classList.remove("sel"));
+      el.classList.add("sel");
+      selectFile(rows[+el.dataset.idx]);
+    };
+  });
+}
+function humanSize(b){
+  if(b<1024) return b+" B";
+  if(b<1048576) return (b/1024).toFixed(0)+" KB";
+  return (b/1048576).toFixed(1)+" MB";
+}
+$("#fileSearch").oninput = e=>{
+  const q = e.target.value.toLowerCase();
+  renderFiles(currentFiltered.filter(r =>
+    Object.values(r).some(v=>(v||"").toLowerCase().includes(q))
+  ));
+};
+
+/* ---------- 5. Resolver URL del GeoJSON en archive.org ---------- */
+function resolveUrl(row){
+  // 1) URL directa en el CSV
+  if(detected.url && (row[detected.url]||"").trim()){
+    return (row[detected.url]).trim();
+  }
+  // 2) identifier + filename → archive.org download
+  const id   = detected.identifier ? (row[detected.identifier]||"").trim() : "";
+  let   file = detected.filename   ? (row[detected.filename]||"").trim()   : "";
+  if(id){
+    // si el identifier ya es una URL completa
+    if(/^https?:\/\//i.test(id)) return id;
+    if(file){
+      return `https://archive.org/download/${encodeURIComponent(id)}/${encodeURIComponent(file)}`;
+    }
+    // sin filename: intentar archivo geojson homónimo
+    return `https://archive.org/download/${encodeURIComponent(id)}/${encodeURIComponent(id)}.geojson`;
+  }
+  // 3) último recurso: alguna celda que parezca url o .geojson
+  for(const h of headers){
+    const v = (row[h]||"").trim();
+    if(/^https?:\/\/.*\.(geo)?json/i.test(v)) return v;
+    if(/^https?:\/\/archive\.org/i.test(v)) return v;
+  }
+  return null;
+}
+function archivePage(row){
+  const id = detected.identifier ? (row[detected.identifier]||"").trim() : "";
+  if(id && !/^https?:\/\//i.test(id)) return `https://archive.org/details/${encodeURIComponent(id)}`;
+  if(/^https?:\/\/archive\.org\/details/i.test(id)) return id;
+  return null;
+}
+
+/* ---------- 6. Cargar y dibujar el GeoJSON ----------
+   Estrategia robusta contra CORS:
+   1) Si el CSV trae una URL directa, se intenta primero.
+   2) Si hay identifier, se consulta https://archive.org/metadata/{id}
+      (este endpoint SÍ tiene CORS abierto) para descubrir el nombre real
+      del archivo .geojson/.json dentro del item y su servidor (d1/dir).
+   3) Se hace fetch del archivo. Si CORS lo bloquea, se reintenta con proxies.
+   4) Pase lo que pase, se deja listo el enlace y la descarga directa
+      (que el navegador hace sin sufrir CORS).
+*/
+const CORS_PROXIES = [
+  u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+  u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+  u => "https://thingproxy.freeboard.io/fetch/" + u,
+  u => "https://api.codetabs.com/v1/proxy/?quest=" + encodeURIComponent(u)
+];
+
+let lastGeoJSON = null, lastName = "capa.geojson", lastDirectUrl = null;
+
+async function fetchJSONAny(url){
+  let lastErr = "";
+  // 1) intento directo (archive.org/metadata suele tener CORS abierto)
+  try{
+    const r = await fetch(url, {redirect:"follow", mode:"cors"});
+    if(r.ok) return await r.json();
+    lastErr = "HTTP "+r.status;
+  }catch(e){ lastErr = "directo: "+e.message; }
+  // 2) intentos vía proxies
+  for(const mk of CORS_PROXIES){
+    try{
+      const r = await fetch(mk(url));
+      if(r.ok){
+        const txt = await r.text();
+        try{ return JSON.parse(txt); }
+        catch(_){ /* proxy devolvió HTML de error, probar siguiente */ }
+      }
+    }catch(e){ lastErr = "proxy: "+e.message; }
+  }
+  throw new Error(lastErr || "sin respuesta de red");
+}
+
+async function discoverViaMetadata(id, preferName){
+  // id puede venir como identificador puro o como URL details/...
+  let ident = id;
+  const m = id.match(/archive\.org\/(?:details|download)\/([^\/?#]+)/i);
+  if(m) ident = m[1];
+  const meta = await fetchJSONAny(`https://archive.org/metadata/${encodeURIComponent(ident)}`);
+  const files = (meta && meta.files) || [];
+
+  // candidatos json/geojson, excluyendo muestras y miniaturas
+  let geo = files.filter(f => /\.(geojson|json)$/i.test(f.name) &&
+                              !/sample/i.test(f.name) &&
+                              !/_meta|files\.xml|_reviews/i.test(f.name));
+  // preferir explícitamente extensión .geojson sobre .json
+  const onlyGeojson = geo.filter(f => /\.geojson$/i.test(f.name));
+  if(onlyGeojson.length) geo = onlyGeojson;
+
+  let chosen = null;
+  if(preferName){
+    chosen = geo.find(f => f.name === preferName) ||
+             geo.find(f => f.name.toLowerCase() === preferName.toLowerCase());
+  }
+  // si hay varios, quedarse con el más grande (el dataset completo, no la muestra)
+  if(!chosen && geo.length){
+    chosen = geo.slice().sort((a,b)=>(+b.size||0)-(+a.size||0))[0];
+  }
+  if(!chosen) return null;
+
+  const server = meta.server || (meta.d1 || meta.d2);
+  const dir = meta.dir || "";
+  const direct = server
+    ? `https://${server}${dir}/${chosen.name}`
+    : `https://archive.org/download/${ident}/${chosen.name}`;
+  return { name: chosen.name, direct, ident };
+}
+
+async function selectFile(row){
+  selectedRow = row;
+  const label = (row[detected.label]||row[detected.filename]||row[detected.identifier]||"capa").trim();
+
+  const ap = archivePage(row);
+  const id = detected.identifier ? (row[detected.identifier]||"").trim() : "";
+  let ident = id;
+  const mm = id.match(/archive\.org\/(?:details|download)\/([^\/?#]+)/i);
+  if(mm) ident = mm[1];
+
+  if(!ident){
+    $("#mapInfo").innerHTML = `<b>${label}</b> — sin identificador de archive.org en el catálogo.`;
+    return;
+  }
+
+  const base = `https://archive.org/download/${encodeURIComponent(ident)}`;
+  // imagen de portada del item (vista previa de la capa). No sufre CORS al usar <img>.
+  const coverUrl  = `${base}/cover.png`;
+  const legendUrl = `${base}/legend.png`;
+  // GeoJSON estándar dentro del item
+  const geojsonUrl = `${base}/dataset.geojson`;
+
+  // preparar descarga (sin hacer fetch: el botón descargará directo)
+  lastGeoJSON = null;
+  lastDirectUrl = geojsonUrl;
+  lastName = (label || ident).trim().replace(/[^\w\-]+/g,"_").replace(/^_+|_+$/g,"") || "capa";
+  lastName += ".geojson";
+
+  // botones
+  $("#archiveBtn").href = ap || base + "/";
+  $("#archiveBtn").classList.remove("hidden");
+  $("#dlBtn").classList.remove("hidden");
+
+  // metadatos legibles desde el CSV
+  const feats = (row["n_features"]||"").trim();
+  const bytes = parseInt(row["bytes_geojson"]||"0",10);
+  const desc  = (row["descripcion"]||row["description"]||"").trim();
+  const metaLine = [
+    feats ? `${feats} objetos` : "",
+    bytes ? humanSize(bytes) : "",
+    `<a href="${ap||base+'/'}" target="_blank" style="color:var(--accent)">archive.org ↗</a>`
+  ].filter(Boolean).join(" · ");
+
+  // mostrar la imagen de portada
+  showImage(coverUrl, legendUrl, label, metaLine, desc);
+}
+
+/* Visor de imagen (reemplaza al mapa interactivo) */
+function showImage(coverUrl, legendUrl, label, metaLine, desc){
+  $("#mapEmpty").classList.add("hidden");
+  const host = $("#map");
+  host.innerHTML = `
+    <div class="imgview">
+      <div class="imgwrap"><span class="imgspin spinner"></span>
+        <img id="coverImg" alt="Vista previa de ${label}" />
+      </div>
+      <img id="legendImg" class="legend" alt="Leyenda" style="display:none" />
+    </div>`;
+  $("#mapInfo").innerHTML = `<b>${label}</b>${desc?` — <span style="color:var(--muted)">${desc}</span>`:""} ${metaLine?`· ${metaLine}`:""}`;
+
+  const img = document.getElementById("coverImg");
+  img.onload  = ()=>{ const s=host.querySelector(".imgspin"); if(s) s.remove(); };
+  img.onerror = ()=>{
+    host.querySelector(".imgwrap").innerHTML =
+      `<div style="text-align:center;color:var(--muted);padding:40px">`+
+      `No hay imagen de vista previa para esta capa.<br>`+
+      `Usa <b>⤓ Descargar GeoJSON</b> para obtener los datos.</div>`;
+  };
+  img.src = coverUrl;
+
+  const leg = document.getElementById("legendImg");
+  leg.onload  = ()=>{ leg.style.display="block"; };
+  leg.onerror = ()=>{ leg.remove(); };
+  leg.src = legendUrl;
+}
+
+/* ---------- descarga ---------- */
+$("#dlBtn").onclick = ()=>{
+  // Si ya tenemos el GeoJSON en memoria (caso raro), bajarlo como blob renombrado
+  if(lastGeoJSON){
+    const blob = new Blob([JSON.stringify(lastGeoJSON)],{type:"application/geo+json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = lastName;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+    return;
+  }
+  // Caso normal: descarga directa del archivo en archive.org
+  // (la descarga del navegador NO está sujeta a CORS)
+  if(lastDirectUrl){
+    const a = document.createElement("a");
+    a.href = lastDirectUrl;
+    a.download = lastName || "";
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+};
+};
+
+/* ---------- reset ---------- */
+function resetFromStep2(){
+  rows=[]; headers=[]; detected={}; selectedRow=null; currentFiltered=[];
+  $("#step2").classList.remove("active","done");
+  $("#step3").classList.remove("active","done");
+  $("#colSel").disabled=$("#valSel").disabled=$("#fileSearch").disabled=true;
+  $("#colSel").innerHTML=$("#valSel").innerHTML="";
+  $("#fileList").innerHTML=""; $("#fileCount").textContent="";
+  $("#fileSearch").value="";
+}
+
+/* ---------- eventos iniciales ---------- */
+$("#catSel").onchange = e=>{ if(e.target.value) loadCatalog(e.target.value); };
+loadCatalogs();
+</script>
+</body>
+</html>
