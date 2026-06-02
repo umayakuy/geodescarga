@@ -215,15 +215,16 @@ const SEARCH_DIRS = ["archivar", "evaluar", "descubrir", ""];
    ============================================================ */
 const COL_HINTS = {
   // identificador del item en archive.org
-  identifier: ["identifier","item","archive","ia_id","ia_identifier","id_archive","internetarchive"],
-  // nombre del archivo (geojson) dentro del item
-  filename:   ["filename","file","archivo","nombre_archivo","geojson","name","fichero"],
+  identifier: ["archive_item","archiveitem","identifier","item","archive","ia_id","ia_identifier","id_archive","internetarchive"],
+  // nombre del archivo (geojson) dentro del item  (este catálogo NO lo trae;
+  // se descubre vía la metadata API de archive.org)
+  filename:   ["filename","file","archivo","nombre_archivo","geojson","fichero","nombre_geojson"],
   // url directa (si el CSV ya la trae)
   url:        ["url","enlace","link","download","descarga","href","geojson_url"],
   // etiqueta legible
-  label:      ["titulo","title","nombre","name","layer","capa","dataset","descripcion","label"],
+  label:      ["titulo","title","nombre","name","layer","capa","dataset","label"],
   // posibles categorías
-  category:   ["categoria","category","grupo","group","tipo","type","tema","theme","fuente","source","departamento","sector","clase"]
+  category:   ["geoserver","categoria","category","grupo","group","tipo","type","tema","theme","fuente","source","departamento","sector","clase"]
 };
 
 const $ = s => document.querySelector(s);
@@ -253,7 +254,10 @@ function matchCol(hints){
     if(hit) return hit;
   }
   for(const h of hints){
-    const hit = headers.find(c => norm(c).includes(norm(h)));
+    const hit = headers.find(c =>
+      norm(c).includes(norm(h)) &&
+      !/^(bytes|tiene|n_|num|count|size|fecha|epsg|bbox)/i.test(c)
+    );
     if(hit) return hit;
   }
   return null;
@@ -392,9 +396,16 @@ function renderFiles(subset){
     const label = (r[detected.label]||"").trim() ||
                   (r[detected.filename]||"").trim() ||
                   (r[detected.identifier]||"").trim() || `registro ${i+1}`;
-    const meta = (r[detected.identifier]||"").trim();
+    // meta secundaria: tamaño legible y nº de features si existen
+    const bytes = parseInt(r["bytes_geojson"]||r["bytes"]||"0",10);
+    const feats = (r["n_features"]||"").trim();
+    let meta = "";
+    if(bytes>0) meta = humanSize(bytes);
+    else meta = (r[detected.identifier]||"").trim();
+    const ftxt = feats ? `${feats} obj` : "";
     return `<div class="fileitem" data-idx="${idx}">
-              <span>${label}</span>${meta?`<span class="meta">${meta}</span>`:""}
+              <span>${label}</span>
+              <span class="meta">${ftxt}${ftxt&&meta?" · ":""}${meta}</span>
             </div>`;
   }).join("");
   list.querySelectorAll(".fileitem").forEach(el=>{
@@ -404,6 +415,11 @@ function renderFiles(subset){
       selectFile(rows[+el.dataset.idx]);
     };
   });
+}
+function humanSize(b){
+  if(b<1024) return b+" B";
+  if(b<1048576) return (b/1024).toFixed(0)+" KB";
+  return (b/1048576).toFixed(1)+" MB";
 }
 $("#fileSearch").oninput = e=>{
   const q = e.target.value.toLowerCase();
@@ -485,15 +501,26 @@ async function discoverViaMetadata(id, preferName){
   if(m) ident = m[1];
   const meta = await fetchJSONAny(`https://archive.org/metadata/${encodeURIComponent(ident)}`);
   const files = (meta && meta.files) || [];
-  // candidatos geojson/json
-  const geo = files.filter(f => /\.(geojson|json)$/i.test(f.name));
+
+  // candidatos json/geojson, excluyendo muestras y miniaturas
+  let geo = files.filter(f => /\.(geojson|json)$/i.test(f.name) &&
+                              !/sample/i.test(f.name) &&
+                              !/_meta|files\.xml|_reviews/i.test(f.name));
+  // preferir explícitamente extensión .geojson sobre .json
+  const onlyGeojson = geo.filter(f => /\.geojson$/i.test(f.name));
+  if(onlyGeojson.length) geo = onlyGeojson;
+
   let chosen = null;
   if(preferName){
     chosen = geo.find(f => f.name === preferName) ||
              geo.find(f => f.name.toLowerCase() === preferName.toLowerCase());
   }
-  if(!chosen) chosen = geo.find(f => /\.geojson$/i.test(f.name)) || geo[0];
+  // si hay varios, quedarse con el más grande (el dataset completo, no la muestra)
+  if(!chosen && geo.length){
+    chosen = geo.slice().sort((a,b)=>(+b.size||0)-(+a.size||0))[0];
+  }
   if(!chosen) return null;
+
   const server = meta.server || (meta.d1 || meta.d2);
   const dir = meta.dir || "";
   const direct = server
