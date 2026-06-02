@@ -266,32 +266,58 @@ function matchCol(hints){
   return null;
 }
 
-/* ---------- 1. Descubrir catálogos vía GitHub API ---------- */
+/* ---------- 1. Descubrir catálogos vía GitHub API (recursivo) ---------- */
 async function loadCatalogs(){
   setStatus('<span class="spinner"></span> Explorando el repositorio…');
   const found = [];
   const seen = new Set();
-  for(const dir of SEARCH_DIRS){
-    const api = `https://api.github.com/repos/${REPO}/contents/${dir}?ref=${BRANCH}`;
-    try{
-      const r = await fetch(api);
-      if(!r.ok) continue;
-      const items = await r.json();
-      if(!Array.isArray(items)) continue;
-      for(const it of items){
-        if(it.type === "file" && /\.csv$/i.test(it.name) && !seen.has(it.path)){
-          seen.add(it.path);
-          found.push({ name: it.path, path: it.path });
+
+  // Método principal: árbol recursivo (encuentra CSV en cualquier subcarpeta)
+  try{
+    const treeApi = `https://api.github.com/repos/${REPO}/git/trees/${BRANCH}?recursive=1`;
+    const r = await fetch(treeApi);
+    if(r.ok){
+      const data = await r.json();
+      const tree = (data && data.tree) || [];
+      for(const it of tree){
+        if(it.type === "blob" && /\.csv$/i.test(it.path) && !seen.has(it.path)){
+          // limitar a las carpetas de interés (o raíz) si SEARCH_DIRS está definido
+          const inScope = SEARCH_DIRS.some(d => d === "" ? !it.path.includes("/") : it.path.startsWith(d+"/"))
+                          || SEARCH_DIRS.length === 0;
+          if(inScope || true){ // incluir todos los CSV del repo
+            seen.add(it.path);
+            found.push({ name: it.path, path: it.path });
+          }
         }
       }
-    }catch(e){ /* sigue con la próxima carpeta */ }
+    }
+  }catch(e){ /* si falla, probamos el método por carpetas abajo */ }
+
+  // Respaldo: listar por carpeta (por si el árbol recursivo no estuvo disponible)
+  if(!found.length){
+    for(const dir of SEARCH_DIRS){
+      const api = `https://api.github.com/repos/${REPO}/contents/${dir}?ref=${BRANCH}`;
+      try{
+        const r = await fetch(api);
+        if(!r.ok) continue;
+        const items = await r.json();
+        if(!Array.isArray(items)) continue;
+        for(const it of items){
+          if(it.type === "file" && /\.csv$/i.test(it.name) && !seen.has(it.path)){
+            seen.add(it.path);
+            found.push({ name: it.path, path: it.path });
+          }
+        }
+      }catch(e){}
+    }
   }
+
   catalogs = found.sort((a,b)=>a.name.localeCompare(b.name));
   const sel = $("#catSel");
   if(!catalogs.length){
     sel.innerHTML = '<option value="">No se hallaron CSV</option>';
-    setStatus("No se encontraron archivos CSV en las carpetas configuradas. "+
-              "Revisa REPO/BRANCH/SEARCH_DIRS en el código.", true);
+    setStatus("No se encontraron archivos CSV en el repositorio. "+
+              "Revisa REPO/BRANCH en el código.", true);
     return;
   }
   sel.innerHTML = '<option value="">— elige —</option>' +
@@ -303,18 +329,36 @@ async function loadCatalogs(){
 /* ---------- 2. Cargar un CSV ---------- */
 function loadCatalog(path){
   resetFromStep2();
-  setStatus('<span class="spinner"></span> Leyendo catálogo…');
+  setStatus('<span class="spinner"></span> Leyendo catálogo… (puede tardar si es grande)');
   Papa.parse(rawBase + path, {
-    download:true, header:true, skipEmptyLines:true,
+    download:true, header:true, skipEmptyLines:"greedy",
     complete: res => {
-      rows = res.data.filter(r => Object.values(r).some(v => (v||"").trim() !== ""));
-      headers = res.meta.fields || [];
-      detectColumns();
-      buildCategoryStep();
-      setStatus(`Catálogo cargado: ${rows.length} registros · columnas detectadas → ` +
-        `id:<b>${detected.identifier||"—"}</b>, archivo:<b>${detected.filename||"—"}</b>, url:<b>${detected.url||"—"}</b>`);
+      try{
+        rows = (res.data||[]).filter(r => r && Object.values(r).some(v => (v||"").toString().trim() !== ""));
+        headers = (res.meta && res.meta.fields) ? res.meta.fields.filter(Boolean) : [];
+
+        if(!headers.length || !rows.length){
+          setStatus(`El catálogo se descargó pero no se pudo interpretar `+
+                    `(filas: ${rows.length}, columnas: ${headers.length}). `+
+                    `Puede tener un formato inesperado.`, true);
+          return;
+        }
+
+        detectColumns();
+        buildCategoryStep();
+
+        const idTxt = detected.identifier || "—";
+        const warn = detected.identifier ? "" :
+          ` ⚠ No se detectó columna de identificador de archive.org; `+
+          `la descarga podría no funcionar para este catálogo.`;
+        setStatus(`Cargado: ${rows.length} filas · ${headers.length} columnas · `+
+                  `id:<b>${idTxt}</b>, categoría:<b>${detected.category||"—"}</b>.${warn}`,
+                  !detected.identifier);
+      }catch(err){
+        setStatus("Error al procesar el CSV: "+err.message, true);
+      }
     },
-    error: err => setStatus("Error al leer el CSV: "+err.message, true)
+    error: err => setStatus("No se pudo descargar el CSV: "+(err && err.message || err), true)
   });
 }
 
