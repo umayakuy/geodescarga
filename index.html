@@ -3,10 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Explorador de GeoDatos · Bolivia</title>
+<title>Explorador de Mapas · Archivo</title>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,14 +13,13 @@
 
 <style>
   :root{
-    --bg:#f4f1e9;          /* papel */
-    --ink:#1a1f1c;         /* tinta */
+    --bg:#f4f1e9;
+    --ink:#1a1f1c;
     --paper:#fbfaf5;
     --line:#cfc9b8;
-    --accent:#1f6b4f;      /* verde topográfico */
-    --accent-2:#c5532b;    /* terracota */
+    --accent:#1f6b4f;
+    --accent-2:#c5532b;
     --muted:#6b6657;
-    --shadow:rgba(26,31,28,.12);
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
@@ -67,4 +64,221 @@
   .step{margin-bottom:26px;opacity:.45;transition:opacity .25s;pointer-events:none}
   .step.active{opacity:1;pointer-events:auto}
   .step .num{
-    display:inline
+    display:inline-flex;align-items:center;justify-content:center;
+    width:24px;height:24px;border:1.5px solid var(--ink);border-radius:50%;
+    font-size:12px;font-weight:600;margin-right:8px;
+  }
+  .step.done .num{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .step h2{
+    font-family:'Fraunces',serif;font-weight:600;font-size:18px;margin:0 0 12px;
+    display:flex;align-items:center;
+  }
+  label.fld{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}
+  select,input[type=text]{
+    width:100%;padding:11px 12px;border:1.5px solid var(--line);border-radius:0;
+    background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;
+    appearance:none;cursor:pointer;
+  }
+  select:focus,input:focus{outline:none;border-color:var(--accent)}
+  select:disabled{opacity:.5;cursor:not-allowed}
+  .selectwrap{position:relative}
+  .selectwrap::after{content:"▾";position:absolute;right:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--accent)}
+
+  .filelist{max-height:350px;overflow-y:auto;border:1.5px solid var(--line);margin-top:4px}
+  .fileitem{
+    padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;
+    display:flex;justify-content:space-between;gap:10px;align-items:center;
+  }
+  .fileitem:last-child{border-bottom:none}
+  .fileitem:hover{background:rgba(31,107,79,.08)}
+  .fileitem.sel{background:var(--accent);color:#fff}
+  .fileitem .meta{font-size:11px;color:var(--muted);flex-shrink:0}
+  .fileitem.sel .meta{color:rgba(255,255,255,.8)}
+
+  .map-wrap{position:relative;display:flex;flex-direction:column}
+  
+  /* Ajuste para visualizar la imagen en lugar del mapa */
+  #map{
+    flex:1;min-height:420px;background:#e8e4d8; 
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  #map img {
+    max-width: 100%; max-height: 70vh; 
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 2px solid var(--ink);
+  }
+
+  .mapbar{
+    padding:10px clamp(14px,2vw,24px);border-bottom:1.5px solid var(--ink);
+    background:var(--paper);display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
+  }
+  .mapbar .info{font-size:12px;color:var(--muted)}
+  .mapbar .info b{color:var(--ink);font-family:'Fraunces',serif}
+  .mapbar .actions{display:flex;gap:10px}
+  
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;justify-content:center;
+    padding:8px 16px; border:2px solid var(--ink);
+    background:var(--accent-2);color:#fff;font-family:'Fraunces',serif;font-weight:600;font-size:13px;
+    cursor:pointer;text-decoration:none;transition:transform .1s,box-shadow .1s;
+    box-shadow:3px 3px 0 var(--ink);
+  }
+  .btn:hover{transform:translate(-2px,-2px);box-shadow:5px 5px 0 var(--ink)}
+  .btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+  .btn.ghost{background:var(--paper);color:var(--ink);box-shadow:3px 3px 0 var(--line);border-color:var(--line)}
+
+  .status{font-size:12px;margin-top:10px;padding:10px;border-left:3px solid var(--accent);background:rgba(31,107,79,.06);color:var(--muted);display:none}
+  .status.show{display:block}
+  .status.err{border-color:var(--accent-2);background:rgba(197,83,43,.08)}
+  .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);text-align:center;padding:40px;gap:14px}
+  .empty .glyph{font-size:54px;font-family:'Fraunces',serif;color:var(--line)}
+  .spinner{width:18px;height:18px;border:2.5px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .hidden{display:none!important}
+  .count{font-size:11px;color:var(--accent);float:right;font-weight:500}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>Explorador de <span class="accent">Mapas</span></h1>
+    <p>Visualiza y descarga mapas históricos y paquetes IDE archivados desde Internet Archive.</p>
+  </div>
+  <div class="src">
+    Repositorio:<br>
+    <a href="https://github.com/mauforonda/geodatos" target="_blank">mauforonda/geodatos</a>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="step active done" id="step1">
+      <h2><span class="num">1</span> Categoría Principal</h2>
+      <label class="fld" for="catSel">Elige un catálogo</label>
+      <div class="selectwrap">
+        <select id="catSel" onchange="if(this.value) loadCatalog(this.value)">
+            <option value="">— elige una opción —</option>
+            <option value="archivar/paquetes.csv">IDE's de Bolivia (paquetes.csv)</option>
+            <option value="archivar/geobolivia_2021/catalogo.csv">GeoBolivia v2021 (catalogo.csv)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="step" id="step2">
+      <h2><span class="num">2</span> Filtro de Categoría</h2>
+      <label class="fld" for="colSel">Agrupar por columna</label>
+      <div class="selectwrap">
+        <select id="colSel" disabled></select>
+      </div>
+      <label class="fld" for="valSel" style="margin-top:12px">Selección</label>
+      <div class="selectwrap">
+        <select id="valSel" disabled></select>
+      </div>
+    </div>
+
+    <div class="step" id="step3">
+      <h2><span class="num">3</span> Seleccionar Mapa <span class="count" id="fileCount"></span></h2>
+      <label class="fld" for="fileSearch">Filtrar</label>
+      <input type="text" id="fileSearch" placeholder="buscar por nombre…" disabled>
+      <div class="filelist" id="fileList"></div>
+    </div>
+
+    <div class="status" id="status"></div>
+  </section>
+
+  <section class="map-wrap">
+    <div class="mapbar">
+      <div class="info" id="mapInfo">Selecciona un mapa para ver su portada.</div>
+      <div class="actions">
+        <a class="btn ghost hidden" id="archiveBtn" target="_blank" rel="noopener">Ver en Archive ↗</a>
+        <button class="btn hidden" id="dlBtn">⤓ Descargar Mapa</button>
+      </div>
+    </div>
+    
+    <div id="map">
+      <div class="empty" id="mapEmpty">
+        <div class="glyph">🖼️</div>
+        <div>Aquí aparecerá el archivo cover.png del mapa.</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ============================================================
+   CONFIGURACIÓN BASE
+   ============================================================ */
+const rawBase = "https://raw.githubusercontent.com/mauforonda/geodatos/master/";
+const $ = s => document.querySelector(s);
+
+const COL_HINTS = {
+  identifier: ["archive_item","archiveitem","identifier","item","archive","ia_id","ia_identifier","id_archive","internetarchive"],
+  filename:   ["filename","file","archivo","nombre_archivo","geojson","fichero","nombre_geojson"],
+  label:      ["titulo","title","nombre","name","layer","capa","dataset","label"],
+  category:   ["geoserver","categoria","category","grupo","group","tipo","type","tema","theme","fuente","source","departamento","sector","clase"]
+};
+
+let rows = [];          
+let headers = [];       
+let detected = {};      
+let selectedRow = null;
+let currentFiltered = [];
+let lastDirectUrl = null;
+
+function setStatus(msg, isErr){
+  const s = $("#status");
+  if(!msg){ s.classList.remove("show"); return; }
+  s.innerHTML = msg;
+  s.classList.toggle("err", !!isErr);
+  s.classList.add("show");
+}
+
+function norm(s){ return (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,""); }
+function matchCol(hints){
+  for(const h of hints){
+    const hit = headers.find(c => norm(c) === norm(h));
+    if(hit) return hit;
+  }
+  for(const h of hints){
+    const hit = headers.find(c => norm(c).includes(norm(h)) && !/^(bytes|tiene|n_|num|count|size|fecha|epsg|bbox)/i.test(c));
+    if(hit) return hit;
+  }
+  return null;
+}
+
+/* ---------- 1. Cargar el CSV (Motor Original de PapaParse) ---------- */
+function loadCatalog(path){
+  resetFromStep2();
+  setStatus('<span class="spinner"></span> Leyendo catálogo velozmente…');
+  
+  // AQUÍ ESTÁ LA MAGIA ORIGINAL: download: true asegura rendimiento
+  Papa.parse(rawBase + path, {
+    download: true, header: true, skipEmptyLines: true,
+    complete: res => {
+      rows = res.data.filter(r => Object.values(r).some(v => (v||"").trim() !== ""));
+      headers = res.meta.fields || [];
+      
+      detected = {};
+      for(const k in COL_HINTS) detected[k] = matchCol(COL_HINTS[k]);
+      if(!detected.label) detected.label = headers[0] || null;
+
+      buildCategoryStep();
+      setStatus(`Cargado: ${rows.length} mapas encontrados.`);
+    },
+    error: err => setStatus("Error al leer el CSV: "+err.message, true)
+  });
+}
+
+/* ---------- 2. Paso categoría (Idéntico a tu original) ---------- */
+function buildCategoryStep(){
+  const step2 = $("#step2");
+  const colSel = $("#colSel");
+  const valSel = $("#valSel");
+
+  const candidates = headers.filter(h=>{
+    const uniq = new Set(rows.map(r=>(r[h]||"").trim()).filter(Boolean));
+    return uniq.size > 1 && uniq.size <= Math.max(40, rows.length*0.6);
+  });
+
+  if(!candidates.length){
+    step2.classList.remove("active");
+    colSel.disabled = val
