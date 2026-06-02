@@ -267,48 +267,59 @@ function matchCol(hints){
 }
 
 /* ---------- 1. Descubrir catálogos vía GitHub API (recursivo) ---------- */
+
+// Catálogos conocidos (respaldo si la API de GitHub está limitada/caída).
+// Si la API responde, esta lista se complementa con lo que encuentre.
+const FALLBACK_CATALOGS = [
+  "archivar/paquetes.csv",
+  "archivar/geobolivia_2021/catalogo.csv"
+];
+
+// fetch con timeout para no colgarse nunca
+function fetchTimeout(url, ms){
+  return Promise.race([
+    fetch(url),
+    new Promise((_, rej)=>setTimeout(()=>rej(new Error("timeout")), ms))
+  ]);
+}
+
 async function loadCatalogs(){
   setStatus('<span class="spinner"></span> Explorando el repositorio…');
   const found = [];
   const seen = new Set();
+  let apiNote = "";
 
   // Método principal: árbol recursivo (encuentra CSV en cualquier subcarpeta)
   try{
     const treeApi = `https://api.github.com/repos/${REPO}/git/trees/${BRANCH}?recursive=1`;
-    const r = await fetch(treeApi);
-    if(r.ok){
+    const r = await fetchTimeout(treeApi, 8000);
+    if(r.status === 403){
+      apiNote = "La API de GitHub limitó las consultas (60/hora). Usando lista conocida.";
+    } else if(r.ok){
       const data = await r.json();
       const tree = (data && data.tree) || [];
       for(const it of tree){
         if(it.type === "blob" && /\.csv$/i.test(it.path) && !seen.has(it.path)){
-          // limitar a las carpetas de interés (o raíz) si SEARCH_DIRS está definido
-          const inScope = SEARCH_DIRS.some(d => d === "" ? !it.path.includes("/") : it.path.startsWith(d+"/"))
-                          || SEARCH_DIRS.length === 0;
-          if(inScope || true){ // incluir todos los CSV del repo
-            seen.add(it.path);
-            found.push({ name: it.path, path: it.path });
-          }
+          seen.add(it.path);
+          found.push({ name: it.path, path: it.path });
         }
       }
+    } else {
+      apiNote = "GitHub respondió "+r.status+". Usando lista conocida.";
     }
-  }catch(e){ /* si falla, probamos el método por carpetas abajo */ }
+  }catch(e){
+    apiNote = "No se pudo consultar GitHub ("+e.message+"). Usando lista conocida.";
+  }
 
-  // Respaldo: listar por carpeta (por si el árbol recursivo no estuvo disponible)
+  // Si la API no devolvió nada, usar la lista de respaldo embebida.
   if(!found.length){
-    for(const dir of SEARCH_DIRS){
-      const api = `https://api.github.com/repos/${REPO}/contents/${dir}?ref=${BRANCH}`;
-      try{
-        const r = await fetch(api);
-        if(!r.ok) continue;
-        const items = await r.json();
-        if(!Array.isArray(items)) continue;
-        for(const it of items){
-          if(it.type === "file" && /\.csv$/i.test(it.name) && !seen.has(it.path)){
-            seen.add(it.path);
-            found.push({ name: it.path, path: it.path });
-          }
-        }
-      }catch(e){}
+    for(const p of FALLBACK_CATALOGS){
+      if(!seen.has(p)){ seen.add(p); found.push({ name:p, path:p }); }
+    }
+  } else {
+    // asegurar que los conocidos estén incluidos aunque el árbol fallara parcialmente
+    for(const p of FALLBACK_CATALOGS){
+      if(!seen.has(p)){ seen.add(p); found.push({ name:p, path:p }); }
     }
   }
 
@@ -316,14 +327,14 @@ async function loadCatalogs(){
   const sel = $("#catSel");
   if(!catalogs.length){
     sel.innerHTML = '<option value="">No se hallaron CSV</option>';
-    setStatus("No se encontraron archivos CSV en el repositorio. "+
-              "Revisa REPO/BRANCH en el código.", true);
+    setStatus("No se encontraron archivos CSV en el repositorio.", true);
     return;
   }
   sel.innerHTML = '<option value="">— elige —</option>' +
     catalogs.map(c=>`<option value="${c.path}">${c.name}</option>`).join("");
-  $("#catHint").textContent = `${catalogs.length} catálogo(s) encontrado(s).`;
+  $("#catHint").textContent = `${catalogs.length} catálogo(s).` + (apiNote ? " "+apiNote : "");
   setStatus("");
+}
 }
 
 /* ---------- 2. Cargar un CSV ---------- */
