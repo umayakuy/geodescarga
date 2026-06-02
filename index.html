@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explorador de GeoDatos · Bolivia</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<!-- PapaParse para CSV -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#f4f1e9;          /* papel */
+    --ink:#1a1f1c;         /* tinta */
+    --paper:#fbfaf5;
+    --line:#cfc9b8;
+    --accent:#1f6b4f;      /* verde topográfico */
+    --accent-2:#c5532b;    /* terracota */
+    --muted:#6b6657;
+    --shadow:rgba(26,31,28,.12);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Spline Sans Mono',monospace;
+    font-size:15px;line-height:1.5;
+    background-image:
+      repeating-linear-gradient(0deg,transparent,transparent 38px,rgba(31,107,79,.04) 39px),
+      repeating-linear-gradient(90deg,transparent,transparent 38px,rgba(31,107,79,.04) 39px);
+  }
+  header{
+    border-bottom:2px solid var(--ink);
+    padding:22px clamp(16px,4vw,48px) 18px;
+    display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;justify-content:space-between;
+    background:var(--paper);
+  }
+  .brand h1{
+    font-family:'Fraunces',serif;font-weight:900;
+    font-size:clamp(26px,4.5vw,44px);line-height:.95;margin:0;letter-spacing:-.02em;
+  }
+  .brand p{margin:6px 0 0;color:var(--muted);font-size:13px;max-width:46ch}
+  .brand .accent{color:var(--accent-2)}
+  header .src{font-size:12px;color:var(--muted);text-align:right}
+  header .src a{color:var(--accent);text-decoration:none;border-bottom:1px dotted}
+
+  main{
+    display:grid;grid-template-columns:minmax(330px,400px) 1fr;
+    gap:0;min-height:calc(100vh - 92px);
+  }
+  @media(max-width:880px){main{grid-template-columns:1fr}}
+
+  .panel{
+    padding:clamp(16px,3vw,30px);
+    border-right:2px solid var(--ink);
+    background:var(--paper);
+    overflow-y:auto;
+  }
+  @media(max-width:880px){.panel{border-right:none;border-bottom:2px solid var(--ink)}}
+
+  .step{margin-bottom:26px;opacity:.45;transition:opacity .25s;pointer-events:none}
+  .step.active{opacity:1;pointer-events:auto}
+  .step .num{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:24px;height:24px;border:1.5px solid var(--ink);border-radius:50%;
+    font-size:12px;font-weight:600;margin-right:8px;
+  }
+  .step.done .num{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .step h2{
+    font-family:'Fraunces',serif;font-weight:600;font-size:18px;margin:0 0 12px;
+    display:flex;align-items:center;
+  }
+  label.fld{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}
+  select,input[type=text]{
+    width:100%;padding:11px 12px;border:1.5px solid var(--line);border-radius:0;
+    background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;
+    appearance:none;cursor:pointer;
+  }
+  select:focus,input:focus{outline:none;border-color:var(--accent)}
+  select:disabled{opacity:.5;cursor:not-allowed}
+  .selectwrap{position:relative}
+  .selectwrap::after{content:"▾";position:absolute;right:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--accent)}
+
+  .filelist{max-height:280px;overflow-y:auto;border:1.5px solid var(--line);margin-top:4px}
+  .fileitem{
+    padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;
+    display:flex;justify-content:space-between;gap:10px;align-items:center;
+  }
+  .fileitem:last-child{border-bottom:none}
+  .fileitem:hover{background:rgba(31,107,79,.08)}
+  .fileitem.sel{background:var(--accent);color:#fff}
+  .fileitem .meta{font-size:11px;color:var(--muted);flex-shrink:0}
+  .fileitem.sel .meta{color:rgba(255,255,255,.8)}
+
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;justify-content:center;
+    width:100%;padding:13px;margin-top:14px;border:2px solid var(--ink);
+    background:var(--accent-2);color:#fff;font-family:'Fraunces',serif;font-weight:600;font-size:15px;
+    cursor:pointer;text-decoration:none;transition:transform .1s,box-shadow .1s;
+    box-shadow:4px 4px 0 var(--ink);
+  }
+  .btn:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 var(--ink)}
+  .btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+  .btn:disabled{background:var(--line);cursor:not-allowed;box-shadow:none;transform:none;color:var(--muted)}
+  .btn.ghost{background:var(--paper);color:var(--ink);box-shadow:4px 4px 0 var(--line);border-color:var(--line)}
+
+  .map-wrap{position:relative;display:flex;flex-direction:column}
+  #map{flex:1;min-height:420px;background:#e8e4d8}
+  .mapbar{
+    padding:10px clamp(14px,2vw,24px);border-bottom:1.5px solid var(--ink);
+    background:var(--paper);display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
+  }
+  .mapbar .info{font-size:12px;color:var(--muted)}
+  .mapbar .info b{color:var(--ink);font-family:'Fraunces',serif}
+  .mapbar .actions{display:flex;gap:10px}
+  .mapbar .btn{width:auto;margin:0;padding:8px 16px;font-size:13px;box-shadow:3px 3px 0 var(--ink)}
+
+  .status{font-size:12px;margin-top:10px;padding:10px;border-left:3px solid var(--accent);background:rgba(31,107,79,.06);color:var(--muted);display:none}
+  .status.show{display:block}
+  .status.err{border-color:var(--accent-2);background:rgba(197,83,43,.08)}
+
+  .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);text-align:center;padding:40px;gap:14px}
+  .empty .glyph{font-size:54px;font-family:'Fraunces',serif;color:var(--line)}
+  .spinner{width:18px;height:18px;border:2.5px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .hidden{display:none!important}
+  .hint{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4}
+  .count{font-size:11px;color:var(--accent);float:right;font-weight:500}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>Explorador de <span class="accent">GeoDatos</span></h1>
+    <p>Navega los catálogos de datos geográficos sobre Bolivia y obtén las capas archivadas en GeoJSON desde Internet Archive.</p>
+  </div>
+  <div class="src">
+    Fuente:<br>
+    <a id="repoLink" href="#" target="_blank" rel="noopener">github.com/…/geodatos</a>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <!-- Paso 1: catálogo -->
+    <div class="step active done" id="step1">
+      <h2><span class="num">1</span> Catálogo</h2>
+      <label class="fld" for="catSel">Elige un catálogo (CSV)</label>
+      <div class="selectwrap">
+        <select id="catSel"><option>Cargando catálogos…</option></select>
+      </div>
+      <div class="hint" id="catHint"></div>
+    </div>
+
+    <!-- Paso 2: categoría -->
+    <div class="step" id="step2">
+      <h2><span class="num">2</span> Categoría</h2>
+      <label class="fld" for="colSel">Agrupar por columna</label>
+      <div class="selectwrap">
+        <select id="colSel" disabled></select>
+      </div>
+      <label class="fld" for="valSel" style="margin-top:12px">Categoría</label>
+      <div class="selectwrap">
+        <select id="valSel" disabled></select>
+      </div>
+      <div class="hint">Si el catálogo no tiene categorías, este paso se omite automáticamente.</div>
+    </div>
+
+    <!-- Paso 3: archivo -->
+    <div class="step" id="step3">
+      <h2><span class="num">3</span> Archivo <span class="count" id="fileCount"></span></h2>
+      <label class="fld" for="fileSearch">Filtrar</label>
+      <input type="text" id="fileSearch" placeholder="buscar por nombre…" disabled>
+      <div class="filelist" id="fileList"></div>
+    </div>
+
+    <div class="status" id="status"></div>
+  </section>
+
+  <section class="map-wrap">
+    <div class="mapbar">
+      <div class="info" id="mapInfo">Selecciona un archivo para visualizar su mapa.</div>
+      <div class="actions">
+        <a class="btn ghost hidden" id="archiveBtn" target="_blank" rel="noopener">Ver en Archive.org ↗</a>
+        <button class="btn hidden" id="dlBtn">⤓ Descargar GeoJSON</button>
+      </div>
+    </div>
+    <div id="map"></div>
+    <div class="empty" id="mapEmpty">
+      <div class="glyph">⌖</div>
+      <div>Aquí aparecerá el mapa de la capa seleccionada.</div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ============================================================
+   CONFIGURACIÓN — ajusta solo esto si forkeas a otro repo
+   ============================================================ */
+const REPO   = "mauforonda/geodatos";  // owner/repo
+const BRANCH = "master";
+// Carpetas del repo donde buscar catálogos CSV (autodescubre dentro de ellas):
+const SEARCH_DIRS = ["archivar", "evaluar", "descubrir", ""];
+
+/* ============================================================
+   Heurísticas: detectar columnas relevantes sin nombres fijos
+   ============================================================ */
+const COL_HINTS = {
+  // identificador del item en archive.org
+  identifier: ["identifier","item","archive","ia_id","ia_identifier","id_archive","internetarchive"],
+  // nombre del archivo (geojson) dentro del item
+  filename:   ["filename","file","archivo","nombre_archivo","geojson","name","fichero"],
+  // url directa (si el CSV ya la trae)
+  url:        ["url","enlace","link","download","descarga","href","geojson_url"],
+  // etiqueta legible
+  label:      ["titulo","title","nombre","name","layer","capa","dataset","descripcion","label"],
+  // posibles categorías
+  category:   ["categoria","category","grupo","group","tipo","type","tema","theme","fuente","source","departamento","sector","clase"]
+};
+
+const $ = s => document.querySelector(s);
+const rawBase = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/`;
+$("#repoLink").href = `https://github.com/${REPO}`;
+$("#repoLink").textContent = `github.com/${REPO}`;
+
+let map, layer;
+let catalogs = [];      // [{name,path}]
+let rows = [];          // filas del CSV activo
+let headers = [];       // cabeceras del CSV activo
+let detected = {};      // columnas detectadas
+let selectedRow = null;
+
+/* ---------- utilidades ---------- */
+function setStatus(msg, isErr){
+  const s = $("#status");
+  if(!msg){ s.classList.remove("show"); return; }
+  s.innerHTML = msg;
+  s.classList.toggle("err", !!isErr);
+  s.classList.add("show");
+}
+function norm(s){ return (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,""); }
+function matchCol(hints){
+  for(const h of hints){
+    const hit = headers.find(c => norm(c) === norm(h));
+    if(hit) return hit;
+  }
+  for(const h of hints){
+    const hit = headers.find(c => norm(c).includes(norm(h)));
+    if(hit) return hit;
+  }
+  return null;
+}
+
+/* ---------- 1. Descubrir catálogos vía GitHub API ---------- */
+async function loadCatalogs(){
+  setStatus('<span class="spinner"></span> Explorando el repositorio…');
+  const found = [];
+  const seen = new Set();
+  for(const dir of SEARCH_DIRS){
+    const api = `https://api.github.com/repos/${REPO}/contents/${dir}?ref=${BRANCH}`;
+    try{
+      const r = await fetch(api);
+      if(!r.ok) continue;
+      const items = await r.json();
+      if(!Array.isArray(items)) continue;
+      for(const it of items){
+        if(it.type === "file" && /\.csv$/i.test(it.name) && !seen.has(it.path)){
+          seen.add(it.path);
+          found.push({ name: it.path, path: it.path });
+        }
+      }
+    }catch(e){ /* sigue con la próxima carpeta */ }
+  }
+  catalogs = found.sort((a,b)=>a.name.localeCompare(b.name));
+  const sel = $("#catSel");
+  if(!catalogs.length){
+    sel.innerHTML = '<option value="">No se hallaron CSV</option>';
+    setStatus("No se encontraron archivos CSV en las carpetas configuradas. "+
+              "Revisa REPO/BRANCH/SEARCH_DIRS en el código.", true);
+    return;
+  }
+  sel.innerHTML = '<option value="">— elige —</option>' +
+    catalogs.map(c=>`<option value="${c.path}">${c.name}</option>`).join("");
+  $("#catHint").textContent = `${catalogs.length} catálogo(s) encontrado(s).`;
+  setStatus("");
+}
+
+/* ---------- 2. Cargar un CSV ---------- */
+function loadCatalog(path){
+  resetFromStep2();
+  setStatus('<span class="spinner"></span> Leyendo catálogo…');
+  Papa.parse(rawBase + path, {
+    download:true, header:true, skipEmptyLines:true,
+    complete: res => {
+      rows = res.data.filter(r => Object.values(r).some(v => (v||"").trim() !== ""));
+      headers = res.meta.fields || [];
+      detectColumns();
+      buildCategoryStep();
+      setStatus(`Catálogo cargado: ${rows.length} registros · columnas detectadas → ` +
+        `id:<b>${detected.identifier||"—"}</b>, archivo:<b>${detected.filename||"—"}</b>, url:<b>${detected.url||"—"}</b>`);
+    },
+    error: err => setStatus("Error al leer el CSV: "+err.message, true)
+  });
+}
+
+function detectColumns(){
+  detected = {};
+  for(const k in COL_HINTS) detected[k] = matchCol(COL_HINTS[k]);
+  // si no hay label, usa la primera columna de texto
+  if(!detected.label) detected.label = headers[0] || null;
+}
+
+/* ---------- 3. Paso categoría ---------- */
+function buildCategoryStep(){
+  const step2 = $("#step2");
+  const colSel = $("#colSel");
+  const valSel = $("#valSel");
+
+  // columnas candidatas a categoría = las que tienen pocos valores únicos
+  const candidates = headers.filter(h=>{
+    const uniq = new Set(rows.map(r=>(r[h]||"").trim()).filter(Boolean));
+    return uniq.size > 1 && uniq.size <= Math.max(40, rows.length*0.6);
+  });
+
+  if(!candidates.length){
+    // sin categorías → saltar directo a archivos
+    step2.classList.remove("active");
+    colSel.disabled = valSel.disabled = true;
+    colSel.innerHTML = valSel.innerHTML = "";
+    buildFileStep(rows);
+    return;
+  }
+
+  // ordenar poniendo primero la categoría "sugerida"
+  if(detected.category && candidates.includes(detected.category)){
+    candidates.sort((a,b)=> a===detected.category ? -1 : b===detected.category ? 1 : 0);
+  }
+  candidates.unshift("(todos los archivos)");
+
+  step2.classList.add("active","done");
+  colSel.disabled = false;
+  colSel.innerHTML = candidates.map(c=>`<option value="${c}">${c}</option>`).join("");
+  valSel.disabled = true;
+  valSel.innerHTML = "";
+
+  colSel.onchange = ()=>{
+    const col = colSel.value;
+    if(col === "(todos los archivos)"){
+      valSel.disabled = true; valSel.innerHTML = "";
+      buildFileStep(rows);
+      return;
+    }
+    const vals = [...new Set(rows.map(r=>(r[col]||"").trim()).filter(Boolean))].sort();
+    valSel.disabled = false;
+    valSel.innerHTML = '<option value="">— todas —</option>' +
+      vals.map(v=>`<option value="${v}">${v}</option>`).join("");
+    buildFileStep(rows);
+    valSel.onchange = ()=>{
+      const v = valSel.value;
+      buildFileStep(v ? rows.filter(r=>(r[col]||"").trim()===v) : rows);
+    };
+  };
+
+  // arranque: primera candidata real (la sugerida)
+  colSel.value = candidates[1] || candidates[0];
+  colSel.onchange();
+}
+
+/* ---------- 4. Paso archivos ---------- */
+let currentFiltered = [];
+function buildFileStep(subset){
+  currentFiltered = subset;
+  const step3 = $("#step3");
+  step3.classList.add("active","done");
+  $("#fileSearch").disabled = false;
+  $("#fileCount").textContent = `${subset.length} archivo(s)`;
+  renderFiles(subset);
+}
+function renderFiles(subset){
+  const list = $("#fileList");
+  if(!subset.length){ list.innerHTML = '<div class="fileitem">Sin archivos</div>'; return; }
+  list.innerHTML = subset.map((r,i)=>{
+    const idx = rows.indexOf(r);
+    const label = (r[detected.label]||"").trim() ||
+                  (r[detected.filename]||"").trim() ||
+                  (r[detected.identifier]||"").trim() || `registro ${i+1}`;
+    const meta = (r[detected.identifier]||"").trim();
+    return `<div class="fileitem" data-idx="${idx}">
+              <span>${label}</span>${meta?`<span class="meta">${meta}</span>`:""}
+            </div>`;
+  }).join("");
+  list.querySelectorAll(".fileitem").forEach(el=>{
+    el.onclick = ()=>{
+      list.querySelectorAll(".fileitem").forEach(x=>x.classList.remove("sel"));
+      el.classList.add("sel");
+      selectFile(rows[+el.dataset.idx]);
+    };
+  });
+}
+$("#fileSearch").oninput = e=>{
+  const q = e.target.value.toLowerCase();
+  renderFiles(currentFiltered.filter(r =>
+    Object.values(r).some(v=>(v||"").toLowerCase().includes(q))
+  ));
+};
+
+/* ---------- 5. Resolver URL del GeoJSON en archive.org ---------- */
+function resolveUrl(row){
+  // 1) URL directa en el CSV
+  if(detected.url && (row[detected.url]||"").trim()){
+    return (row[detected.url]).trim();
+  }
+  // 2) identifier + filename → archive.org download
+  const id   = detected.identifier ? (row[detected.identifier]||"").trim() : "";
+  let   file = detected.filename   ? (row[detected.filename]||"").trim()   : "";
+  if(id){
+    // si el identifier ya es una URL completa
+    if(/^https?:\/\//i.test(id)) return id;
+    if(file){
+      return `https://archive.org/download/${encodeURIComponent(id)}/${encodeURIComponent(file)}`;
+    }
+    // sin filename: intentar archivo geojson homónimo
+    return `https://archive.org/download/${encodeURIComponent(id)}/${encodeURIComponent(id)}.geojson`;
+  }
+  // 3) último recurso: alguna celda que parezca url o .geojson
+  for(const h of headers){
+    const v = (row[h]||"").trim();
+    if(/^https?:\/\/.*\.(geo)?json/i.test(v)) return v;
+    if(/^https?:\/\/archive\.org/i.test(v)) return v;
+  }
+  return null;
+}
+function archivePage(row){
+  const id = detected.identifier ? (row[detected.identifier]||"").trim() : "";
+  if(id && !/^https?:\/\//i.test(id)) return `https://archive.org/details/${encodeURIComponent(id)}`;
+  if(/^https?:\/\/archive\.org\/details/i.test(id)) return id;
+  return null;
+}
+
+/* ---------- 6. Cargar y dibujar el GeoJSON ---------- */
+let lastGeoJSON = null, lastName = "capa.geojson";
+async function selectFile(row){
+  selectedRow = row;
+  const url = resolveUrl(row);
+  const label = (row[detected.label]||row[detected.filename]||row[detected.identifier]||"capa").trim();
+
+  $("#mapInfo").innerHTML = `<b>${label}</b> — <span class="spinner"></span> descargando GeoJSON…`;
+  $("#dlBtn").classList.add("hidden");
+  const ap = archivePage(row);
+  if(ap){ $("#archiveBtn").href = ap; $("#archiveBtn").classList.remove("hidden"); }
+  else  { $("#archiveBtn").classList.add("hidden"); }
+
+  if(!url){
+    $("#mapInfo").innerHTML = `<b>${label}</b> — no se pudo construir la URL del GeoJSON. `+
+      `Revisa las columnas del catálogo.`;
+    return;
+  }
+
+  try{
+    const r = await fetch(url);
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const data = await r.json();
+    lastGeoJSON = data;
+    lastName = (detected.filename ? (row[detected.filename]||"") : "") || (label.replace(/\s+/g,"_")+".geojson");
+    if(!/\.geojson$|\.json$/i.test(lastName)) lastName += ".geojson";
+    drawGeoJSON(data, label, url);
+  }catch(e){
+    $("#mapInfo").innerHTML = `<b>${label}</b> — error al descargar: ${e.message}. `+
+      (ap?`Prueba el botón <i>Ver en Archive.org</i>.`:"");
+  }
+}
+
+function ensureMap(){
+  if(map) return;
+  $("#mapEmpty").classList.add("hidden");
+  map = L.map("map",{zoomControl:true}).setView([-16.5,-64.5], 5); // Bolivia
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",{
+    attribution:'&copy; OpenStreetMap &copy; CARTO', maxZoom:19
+  }).addTo(map);
+}
+function drawGeoJSON(data, label, url){
+  ensureMap();
+  if(layer) map.removeLayer(layer);
+  layer = L.geoJSON(data,{
+    style:{ color:"#1f6b4f", weight:1.5, fillColor:"#1f6b4f", fillOpacity:.18 },
+    pointToLayer:(f,latlng)=>L.circleMarker(latlng,{radius:4,color:"#c5532b",fillOpacity:.7,weight:1}),
+    onEachFeature:(f,lyr)=>{
+      if(f.properties){
+        const html = Object.entries(f.properties).slice(0,12)
+          .map(([k,v])=>`<b>${k}</b>: ${v}`).join("<br>");
+        if(html) lyr.bindPopup(html);
+      }
+    }
+  }).addTo(map);
+  try{ map.fitBounds(layer.getBounds(),{padding:[20,20]}); }catch(e){}
+  const n = (data.features||[]).length;
+  $("#mapInfo").innerHTML = `<b>${label}</b> — ${n} entidad(es) · <a href="${url}" target="_blank" style="color:var(--accent)">origen ↗</a>`;
+  $("#dlBtn").classList.remove("hidden");
+}
+
+/* ---------- descarga ---------- */
+$("#dlBtn").onclick = ()=>{
+  if(!lastGeoJSON) return;
+  const blob = new Blob([JSON.stringify(lastGeoJSON)],{type:"application/geo+json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = lastName;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+};
+
+/* ---------- reset ---------- */
+function resetFromStep2(){
+  rows=[]; headers=[]; detected={}; selectedRow=null; currentFiltered=[];
+  $("#step2").classList.remove("active","done");
+  $("#step3").classList.remove("active","done");
+  $("#colSel").disabled=$("#valSel").disabled=$("#fileSearch").disabled=true;
+  $("#colSel").innerHTML=$("#valSel").innerHTML="";
+  $("#fileList").innerHTML=""; $("#fileCount").textContent="";
+  $("#fileSearch").value="";
+}
+
+/* ---------- eventos iniciales ---------- */
+$("#catSel").onchange = e=>{ if(e.target.value) loadCatalog(e.target.value); };
+loadCatalogs();
+</script>
+</body>
+</html>
