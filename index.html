@@ -1,76 +1,71 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<title>Catálogo Geodatos</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-<style>
-  body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; background: #fbfaf5; }
-  .panel { width: 350px; padding: 20px; border-right: 2px solid #1a1f1c; overflow-y: auto; }
-  .viewer { flex: 1; padding: 40px; display: flex; flex-direction: column; align-items: center; }
-  .item { padding: 12px; cursor: pointer; border-bottom: 1px solid #cfc9b8; transition: 0.2s; }
-  .item:hover { background: #e8e4d8; }
-  #coverImg { max-width: 80%; border: 1px solid #1a1f1c; box-shadow: 5px 5px 0px #1f6b4f; }
-  .btn { margin-top: 20px; padding: 10px 20px; background: #1f6b4f; color: white; border: none; cursor: pointer; text-decoration: none; }
-</style>
+    <meta charset="UTF-8">
+    <title>Descarga de Mapas - Soberanía Tecnológica</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
 </head>
-<body>
+<body class="bg-light">
+    <div class="container mt-5">
+        <h2 class="mb-4">Explorador de Mapas</h2>
+        
+        <div class="row g-3">
+            <div class="col-md-4">
+                <select id="cat" class="form-select" onchange="loadSub()">
+                    <option value="">Seleccione Categoría</option>
+                    <option value="https://raw.githubusercontent.com/mauforonda/geodatos/master/archivar/paquetes.csv">IDE's de Bolivia</option>
+                    <option value="https://raw.githubusercontent.com/mauforonda/geodatos/master/archivar/geobolivia_2021/catalogo.csv">GeoBolivia v2021</option>
+                </select>
+            </div>
+            <div class="col-md-4" id="subContainer" style="display:none;">
+                <select id="subcat" class="form-select" onchange="displayMap()"></select>
+            </div>
+        </div>
 
-<section class="panel">
-  <h2>CATÁLOGO</h2>
-  <select id="catSel" style="width:100%; padding:8px; margin-bottom:20px;">
-    <option value="archivar/paquetes.csv">IDE's de Bolivia</option>
-    <option value="archivar/geobolivia_2021/catalogo.csv">GeoBolivia v2021</option>
-  </select>
-  
-  <div id="fileList"></div>
-</section>
+        <div id="displayArea" class="mt-4 p-3 bg-white border rounded shadow-sm" style="display:none;">
+            <h4 id="mapTitle"></h4>
+            <img id="coverImg" src="" class="img-fluid my-3" style="max-height: 300px;">
+            <br>
+            <a id="downloadBtn" href="#" class="btn btn-primary" target="_blank">Descargar Mapa</a>
+        </div>
+    </div>
 
-<section class="viewer" id="displayArea">
-  <div style="color:#6b6657;">Selecciona un elemento para previsualizar</div>
-</section>
+    <script>
+        let currentData = [];
 
-<script>
-const REPO = "mauforonda/geodatos";
-const BRANCH = "master";
+        async function loadSub() {
+            const url = document.getElementById('cat').value;
+            if (!url) return;
 
-// Inicializar
-const catSel = document.getElementById("catSel");
-catSel.onchange = () => loadCSV(catSel.value);
+            const response = await fetch(url);
+            const csvText = await response.text();
+            const results = Papa.parse(csvText, { header: true });
+            currentData = results.data;
 
-function loadCSV(path) {
-  const url = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/${path}`;
-  Papa.parse(url, {
-    download: true, header: true,
-    complete: res => {
-      const list = document.getElementById("fileList");
-      list.innerHTML = `<h4>Contenido</h4>`;
-      res.data.forEach(row => {
-        if(!row.identifier) return;
-        const div = document.createElement("div");
-        div.className = "item";
-        div.textContent = row.titulo || "Sin título";
-        div.onclick = () => renderView(row.identifier, row.titulo);
-        list.appendChild(div);
-      });
-    }
-  });
-}
+            const sub = document.getElementById('subcat');
+            sub.innerHTML = '<option>Seleccione un mapa...</option>';
+            
+            // Suponemos que el CSV tiene columnas 'nombre' e 'id' (ajustar según el CSV real)
+            currentData.forEach((row, index) => {
+                if (row.nombre) {
+                    sub.innerHTML += `<option value="${index}">${row.nombre}</option>`;
+                }
+            });
+            document.getElementById('subContainer').style.display = 'block';
+        }
 
-function renderView(id, titulo) {
-  const area = document.getElementById("displayArea");
-  const imgUrl = `https://archive.org/download/${id}/cover.png`;
-  const downloadUrl = `https://archive.org/details/${id}`;
-  
-  area.innerHTML = `
-    <h1>${titulo}</h1>
-    <img id="coverImg" src="${imgUrl}" onerror="this.src='https://via.placeholder.com/400?text=Sin+Imagen'">
-    <a href="${downloadUrl}" target="_blank" class="btn">Descargar / Ver en Archive.org</a>
-  `;
-}
-
-// Carga inicial
-loadCSV(catSel.value);
-</script>
+        function displayMap() {
+            const idx = document.getElementById('subcat').value;
+            const item = currentData[idx];
+            
+            document.getElementById('mapTitle').innerText = item.nombre;
+            // Construcción dinámica de la URL en Archive.org
+            document.getElementById('coverImg').src = `https://archive.org/download/${item.id}/cover.png`;
+            document.getElementById('downloadBtn').href = `https://archive.org/download/${item.id}/${item.archivo}`;
+            
+            document.getElementById('displayArea').style.display = 'block';
+        }
+    </script>
 </body>
 </html>
