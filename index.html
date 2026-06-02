@@ -2,82 +2,77 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Explorador Geodatos</title>
+    <title>Explorador Rápido</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
 </head>
 <body class="bg-light">
     <div class="container mt-4">
-        <h2>Catálogo de Mapas</h2>
-        <div class="row g-3 mt-2">
-            <div class="col-md-6">
-                <select id="cat" class="form-select" onchange="procesarCSV()">
-                    <option value="">-- Seleccione Catálogo --</option>
-                    <option value="https://raw.githubusercontent.com/mauforonda/geodatos/master/archivar/paquetes.csv">IDE's de Bolivia</option>
-                    <option value="https://raw.githubusercontent.com/mauforonda/geodatos/master/archivar/geobolivia_2021/catalogo.csv">GeoBolivia v2021</option>
-                </select>
-            </div>
-            <div class="col-md-6">
-                <select id="subcat" class="form-select" onchange="mostrarDetalle()">
-                    <option value="">-- Seleccione Mapa --</option>
-                </select>
-            </div>
-        </div>
+        <select id="cat" class="form-select mb-3" onchange="cargarCatalogo()">
+            <option value="">1. Seleccione Categoría</option>
+            <option value="https://raw.githubusercontent.com/mauforonda/geodatos/master/archivar/paquetes.csv">IDE's de Bolivia</option>
+            <option value="https://raw.githubusercontent.com/mauforonda/geodatos/master/archivar/geobolivia_2021/catalogo.csv">GeoBolivia v2021</option>
+        </select>
 
-        <div id="resultado" class="card mt-4 p-3 shadow-sm" style="display:none;">
-            <h4 id="tituloMapa"></h4>
-            <div class="row">
-                <div class="col-md-4">
-                    <img id="imgCover" src="" class="img-fluid border" alt="Cover">
-                </div>
-                <div class="col-md-8 d-flex align-items-center">
-                    <a id="btnDescarga" href="#" class="btn btn-success btn-lg" target="_blank">Descargar Archivo</a>
-                </div>
-            </div>
+        <select id="subcat" class="form-select mb-3" onchange="filtrarMapas()" disabled>
+            <option value="">2. Seleccione Subcategoría (si existe)</option>
+        </select>
+
+        <select id="mapa" class="form-select mb-3" onchange="mostrarMapa()" disabled>
+            <option value="">3. Seleccione Mapa</option>
+        </select>
+
+        <div id="resultado" class="card p-3 shadow-sm" style="display:none;">
+            <h4 id="mapTitle"></h4>
+            <img id="coverImg" src="" class="img-fluid border my-2" style="max-width:300px;">
+            <br>
+            <a id="downloadBtn" href="#" class="btn btn-primary" target="_blank">Descargar</a>
         </div>
     </div>
 
     <script>
-        let datosCSV = [];
+        let datosGlobales = [];
 
-        async function procesarCSV() {
+        async function cargarCatalogo() {
             const url = document.getElementById('cat').value;
-            const selectSub = document.getElementById('subcat');
-            
-            // Limpieza
-            selectSub.innerHTML = '<option value="">-- Seleccione Mapa --</option>';
-            document.getElementById('resultado').style.display = 'none';
             if(!url) return;
-
+            
+            // Descarga una sola vez y almacena en memoria
             const res = await fetch(url);
-            const texto = await res.text();
-            const config = Papa.parse(texto, { header: true, skipEmptyLines: true });
-            datosCSV = config.data;
+            const text = await res.text();
+            datosGlobales = Papa.parse(text, { header: true }).data;
 
-            // Detección automática de columnas
-            const keys = Object.keys(datosCSV[0]);
-            const colNombre = keys.find(k => /nombre|title|titulo/i.test(k)) || keys[0];
+            // Habilitar subcategoría (suponiendo que hay una columna 'categoria')
+            const sub = document.getElementById('subcat');
+            sub.disabled = false;
+            sub.innerHTML = '<option value="">Todas</option>';
+            
+            const cats = [...new Set(datosGlobales.map(d => d.categoria || d.grupo || "General"))];
+            cats.forEach(c => sub.innerHTML += `<option value="${c}">${c}</option>`);
+        }
 
-            datosCSV.forEach((fila, index) => {
-                const nombre = fila[colNombre] || "Sin nombre";
-                selectSub.innerHTML += `<option value="${index}">${nombre}</option>`;
+        function filtrarMapas() {
+            const catSel = document.getElementById('subcat').value;
+            const mapaSel = document.getElementById('mapa');
+            mapaSel.disabled = false;
+            mapaSel.innerHTML = '<option value="">Seleccione mapa...</option>';
+
+            const filtrados = catSel === "" ? datosGlobales : 
+                              datosGlobales.filter(d => (d.categoria || d.grupo || "General") === catSel);
+
+            filtrados.forEach((m, i) => {
+                mapaSel.innerHTML += `<option value="${i}">${m.nombre || m.title}</option>`;
             });
         }
 
-        function mostrarDetalle() {
-            const idx = document.getElementById('subcat').value;
+        function mostrarMapa() {
+            const idx = document.getElementById('mapa').value;
             if(idx === "") return;
-
-            const fila = datosCSV[idx];
-            const keys = Object.keys(fila);
             
-            // Búsqueda inteligente de identificador y archivo
-            const id = fila.id || fila.identificador || fila.ID || fila[keys[0]]; 
-            const archivo = fila.archivo || fila.filename || keys[keys.length-1];
-
-            document.getElementById('tituloMapa').innerText = fila[keys.find(k => /nombre|title|titulo/i.test(k))];
-            document.getElementById('imgCover').src = `https://archive.org/download/${id}/cover.png`;
-            document.getElementById('btnDescarga').href = `https://archive.org/download/${id}/${archivo}`;
+            const item = datosGlobales[idx];
+            document.getElementById('mapTitle').innerText = item.nombre || item.title;
+            document.getElementById('coverImg').src = `https://archive.org/download/${item.id}/cover.png`;
+            document.getElementById('downloadBtn').href = `https://archive.org/download/${item.id}/${item.archivo || item.id + '.geojson'}`;
             document.getElementById('resultado').style.display = 'block';
         }
     </script>
