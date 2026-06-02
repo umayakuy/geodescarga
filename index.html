@@ -445,11 +445,65 @@ function archivePage(row){
   return null;
 }
 
-/* ---------- 6. Cargar y dibujar el GeoJSON ---------- */
-let lastGeoJSON = null, lastName = "capa.geojson";
+/* ---------- 6. Cargar y dibujar el GeoJSON ----------
+   Estrategia robusta contra CORS:
+   1) Si el CSV trae una URL directa, se intenta primero.
+   2) Si hay identifier, se consulta https://archive.org/metadata/{id}
+      (este endpoint SÍ tiene CORS abierto) para descubrir el nombre real
+      del archivo .geojson/.json dentro del item y su servidor (d1/dir).
+   3) Se hace fetch del archivo. Si CORS lo bloquea, se reintenta con proxies.
+   4) Pase lo que pase, se deja listo el enlace y la descarga directa
+      (que el navegador hace sin sufrir CORS).
+*/
+const CORS_PROXIES = [
+  u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+  u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u)
+];
+
+let lastGeoJSON = null, lastName = "capa.geojson", lastDirectUrl = null;
+
+async function fetchJSONAny(url){
+  // intento directo
+  try{
+    const r = await fetch(url, {redirect:"follow"});
+    if(r.ok) return await r.json();
+  }catch(e){ /* probablemente CORS, seguimos */ }
+  // intentos vía proxy
+  for(const mk of CORS_PROXIES){
+    try{
+      const r = await fetch(mk(url));
+      if(r.ok) return await r.json();
+    }catch(e){ /* siguiente proxy */ }
+  }
+  throw new Error("no se pudo descargar (CORS/red)");
+}
+
+async function discoverViaMetadata(id, preferName){
+  // id puede venir como identificador puro o como URL details/...
+  let ident = id;
+  const m = id.match(/archive\.org\/(?:details|download)\/([^\/?#]+)/i);
+  if(m) ident = m[1];
+  const meta = await fetchJSONAny(`https://archive.org/metadata/${encodeURIComponent(ident)}`);
+  const files = (meta && meta.files) || [];
+  // candidatos geojson/json
+  const geo = files.filter(f => /\.(geojson|json)$/i.test(f.name));
+  let chosen = null;
+  if(preferName){
+    chosen = geo.find(f => f.name === preferName) ||
+             geo.find(f => f.name.toLowerCase() === preferName.toLowerCase());
+  }
+  if(!chosen) chosen = geo.find(f => /\.geojson$/i.test(f.name)) || geo[0];
+  if(!chosen) return null;
+  const server = meta.server || (meta.d1 || meta.d2);
+  const dir = meta.dir || "";
+  const direct = server
+    ? `https://${server}${dir}/${chosen.name}`
+    : `https://archive.org/download/${ident}/${chosen.name}`;
+  return { name: chosen.name, direct, ident };
+}
+
 async function selectFile(row){
   selectedRow = row;
-  const url = resolveUrl(row);
   const label = (row[detected.label]||row[detected.filename]||row[detected.identifier]||"capa").trim();
 
   $("#mapInfo").innerHTML = `<b>${label}</b> — <span class="spinner"></span> descargando GeoJSON…`;
@@ -458,23 +512,49 @@ async function selectFile(row){
   if(ap){ $("#archiveBtn").href = ap; $("#archiveBtn").classList.remove("hidden"); }
   else  { $("#archiveBtn").classList.add("hidden"); }
 
-  if(!url){
-    $("#mapInfo").innerHTML = `<b>${label}</b> — no se pudo construir la URL del GeoJSON. `+
-      `Revisa las columnas del catálogo.`;
-    return;
-  }
+  // 1) URL directa declarada en el CSV
+  const directField = detected.url ? (row[detected.url]||"").trim() : "";
+  const id   = detected.identifier ? (row[detected.identifier]||"").trim() : "";
+  const fnm  = detected.filename   ? (row[detected.filename]||"").trim()   : "";
+
+  let url = null, name = null;
 
   try{
-    const r = await fetch(url);
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    const data = await r.json();
+    if(directField && /^https?:\/\//i.test(directField)){
+      url = directField;
+      name = fnm || directField.split("/").pop();
+    } else if(id){
+      // 2) descubrir vía metadata API (resuelve nombre y servidor correctos)
+      const info = await discoverViaMetadata(id, fnm || null);
+      if(info){ url = info.direct; name = info.name; }
+      else if(fnm){ url = `https://archive.org/download/${encodeURIComponent(id)}/${encodeURIComponent(fnm)}`; name = fnm; }
+    } else {
+      url = resolveUrl(row);
+      name = fnm || (label.replace(/\s+/g,"_")+".geojson");
+    }
+
+    if(!url) throw new Error("no encontré un archivo .geojson en este item");
+
+    lastDirectUrl = url;
+    $("#archiveBtn").href = ap || url;
+    $("#archiveBtn").classList.remove("hidden");
+
+    // 3) descargar el JSON (con fallback a proxies)
+    const data = await fetchJSONAny(url);
     lastGeoJSON = data;
-    lastName = (detected.filename ? (row[detected.filename]||"") : "") || (label.replace(/\s+/g,"_")+".geojson");
+    lastName = name || "capa.geojson";
     if(!/\.geojson$|\.json$/i.test(lastName)) lastName += ".geojson";
     drawGeoJSON(data, label, url);
+
   }catch(e){
-    $("#mapInfo").innerHTML = `<b>${label}</b> — error al descargar: ${e.message}. `+
-      (ap?`Prueba el botón <i>Ver en Archive.org</i>.`:"");
+    // 4) aunque el fetch falle, ofrecemos descarga directa garantizada
+    lastGeoJSON = null;
+    lastDirectUrl = url;
+    $("#mapInfo").innerHTML =
+      `<b>${label}</b> — no se pudo previsualizar (${e.message}). ` +
+      (url ? `Usa <b>⤓ Descargar GeoJSON</b> (descarga directa del navegador) o <i>Ver en Archive.org</i>.`
+           : `Revisa las columnas del catálogo.`);
+    if(url) $("#dlBtn").classList.remove("hidden"); // botón hará descarga directa
   }
 }
 
@@ -508,13 +588,25 @@ function drawGeoJSON(data, label, url){
 
 /* ---------- descarga ---------- */
 $("#dlBtn").onclick = ()=>{
-  if(!lastGeoJSON) return;
-  const blob = new Blob([JSON.stringify(lastGeoJSON)],{type:"application/geo+json"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = lastName;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(a.href);
+  // Caso A: ya tenemos el GeoJSON en memoria → descarga como blob
+  if(lastGeoJSON){
+    const blob = new Blob([JSON.stringify(lastGeoJSON)],{type:"application/geo+json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = lastName;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+    return;
+  }
+  // Caso B: la previsualización falló por CORS → descarga directa del archivo
+  // (la navegación de descarga NO está sujeta a CORS)
+  if(lastDirectUrl){
+    const a = document.createElement("a");
+    a.href = lastDirectUrl;
+    a.download = lastName || "";
+    a.target = "_blank";
+    document.body.appendChild(a); a.click(); a.remove();
+  }
 };
 
 /* ---------- reset ---------- */
