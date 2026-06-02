@@ -472,26 +472,34 @@ function archivePage(row){
       (que el navegador hace sin sufrir CORS).
 */
 const CORS_PROXIES = [
+  u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
   u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
-  u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u)
+  u => "https://thingproxy.freeboard.io/fetch/" + u,
+  u => "https://api.codetabs.com/v1/proxy/?quest=" + encodeURIComponent(u)
 ];
 
 let lastGeoJSON = null, lastName = "capa.geojson", lastDirectUrl = null;
 
 async function fetchJSONAny(url){
-  // intento directo
+  let lastErr = "";
+  // 1) intento directo (archive.org/metadata suele tener CORS abierto)
   try{
-    const r = await fetch(url, {redirect:"follow"});
+    const r = await fetch(url, {redirect:"follow", mode:"cors"});
     if(r.ok) return await r.json();
-  }catch(e){ /* probablemente CORS, seguimos */ }
-  // intentos vía proxy
+    lastErr = "HTTP "+r.status;
+  }catch(e){ lastErr = "directo: "+e.message; }
+  // 2) intentos vía proxies
   for(const mk of CORS_PROXIES){
     try{
       const r = await fetch(mk(url));
-      if(r.ok) return await r.json();
-    }catch(e){ /* siguiente proxy */ }
+      if(r.ok){
+        const txt = await r.text();
+        try{ return JSON.parse(txt); }
+        catch(_){ /* proxy devolvió HTML de error, probar siguiente */ }
+      }
+    }catch(e){ lastErr = "proxy: "+e.message; }
   }
-  throw new Error("no se pudo descargar (CORS/red)");
+  throw new Error(lastErr || "sin respuesta de red");
 }
 
 async function discoverViaMetadata(id, preferName){
@@ -544,44 +552,72 @@ async function selectFile(row){
   const id   = detected.identifier ? (row[detected.identifier]||"").trim() : "";
   const fnm  = detected.filename   ? (row[detected.filename]||"").trim()   : "";
 
+  // identificador limpio (por si viene como URL details/...)
+  let ident = id;
+  const mm = id.match(/archive\.org\/(?:details|download)\/([^\/?#]+)/i);
+  if(mm) ident = mm[1];
+
   let url = null, name = null;
+
+  // En este archivo de Internet Archive cada item guarda la capa SIEMPRE
+  // como "dataset.geojson". Usamos esa ruta directa, que es la que funciona.
+  const STD = "dataset.geojson";
+  const stdUrl = ident ? `https://archive.org/download/${encodeURIComponent(ident)}/${STD}` : null;
+  // Enlace de respaldo (carpeta del item) por si todo lo demás falla.
+  const fallbackDownload = ident ? `https://archive.org/download/${encodeURIComponent(ident)}/` : null;
 
   try{
     if(directField && /^https?:\/\//i.test(directField)){
       url = directField;
       name = fnm || directField.split("/").pop();
-    } else if(id){
-      // 2) descubrir vía metadata API (resuelve nombre y servidor correctos)
-      const info = await discoverViaMetadata(id, fnm || null);
-      if(info){ url = info.direct; name = info.name; }
-      else if(fnm){ url = `https://archive.org/download/${encodeURIComponent(id)}/${encodeURIComponent(fnm)}`; name = fnm; }
+    } else if(ident){
+      // ruta estándar conocida
+      url = stdUrl;
+      name = STD;
     } else {
       url = resolveUrl(row);
       name = fnm || (label.replace(/\s+/g,"_")+".geojson");
     }
 
-    if(!url) throw new Error("no encontré un archivo .geojson en este item");
+    if(!url) throw new Error("sin identificador de archive.org");
 
     lastDirectUrl = url;
     $("#archiveBtn").href = ap || url;
     $("#archiveBtn").classList.remove("hidden");
 
-    // 3) descargar el JSON (con fallback a proxies)
-    const data = await fetchJSONAny(url);
+    // descargar el JSON (directo y, si CORS lo bloquea, vía proxies)
+    let data;
+    try{
+      data = await fetchJSONAny(url);
+    }catch(e1){
+      // último recurso: descubrir el nombre real vía metadata API
+      const info = await discoverViaMetadata(ident, fnm || null);
+      if(!info) throw e1;
+      url = info.direct; name = info.name; lastDirectUrl = url;
+      data = await fetchJSONAny(url);
+    }
+
     lastGeoJSON = data;
-    lastName = name || "capa.geojson";
-    if(!/\.geojson$|\.json$/i.test(lastName)) lastName += ".geojson";
+    // nombre de descarga legible basado en el título/identificador (no "dataset.geojson")
+    lastName = (label || ident || "capa").trim().replace(/[^\w\-]+/g,"_").replace(/^_+|_+$/g,"");
+    if(!lastName) lastName = "capa";
+    lastName += ".geojson";
     drawGeoJSON(data, label, url);
 
   }catch(e){
-    // 4) aunque el fetch falle, ofrecemos descarga directa garantizada
+    // aunque el fetch falle, ofrecemos descarga directa garantizada
     lastGeoJSON = null;
-    lastDirectUrl = url;
+    lastDirectUrl = url || stdUrl || fallbackDownload;
+    const target = lastDirectUrl;
     $("#mapInfo").innerHTML =
-      `<b>${label}</b> — no se pudo previsualizar (${e.message}). ` +
-      (url ? `Usa <b>⤓ Descargar GeoJSON</b> (descarga directa del navegador) o <i>Ver en Archive.org</i>.`
-           : `Revisa las columnas del catálogo.`);
-    if(url) $("#dlBtn").classList.remove("hidden"); // botón hará descarga directa
+      `<b>${label}</b> — no se pudo previsualizar en el mapa (${e.message}). ` +
+      (target ? `Pulsa <b>⤓ Descargar GeoJSON</b> o abre <i>Ver en Archive.org</i> para obtener el archivo.`
+              : `Revisa las columnas del catálogo.`);
+    if(target){
+      $("#dlBtn").classList.remove("hidden");
+      $("#archiveBtn").href = ap || target;
+      $("#archiveBtn").classList.remove("hidden");
+    }
   }
 }
 
